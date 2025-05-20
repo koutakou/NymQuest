@@ -1,0 +1,16 @@
+[package]
+name = "nym-mmorpg-server"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+nym-sdk = { git = "https://github.com/nymtech/nym", branch = "master" }
+tokio = { version = "1", features = ["full"] }
+futures = "0.3"
+anyhow = "1.0"
+env_logger = "0.10"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
+uuid = { version = "1.4", features = ["v4"] }
+tracing = "0.1"
