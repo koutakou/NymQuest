@@ -104,3 +104,15 @@ NYM-MMORPG demonstrates several key privacy benefits:
 - Persistent player progression
 - Web-based client interface
 - Mobile client support
+
+## Screenshot
+Server
+<img width="1036" alt="image" src="https://github.com/user-attachments/assets/50db5ee3-9a82-44d1-befc-8b5c0665e1b8" />
+
+Client 1
+<img width="1022" alt="image" src="https://github.com/user-attachments/assets/6c5989fb-2a9a-4bd3-aa21-68447115deb5" />
+
+Client 2
+<img width="1022" alt="image" src="https://github.com/user-attachments/assets/94d73849-df64-49e9-a109-68c9df90fe63" />
+
+
