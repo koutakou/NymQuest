@@ -16,3 +16,4 @@ uuid = { version = "1.4", features = ["v4"] }
 colored = "2.0"
 rustyline = "10.0.0"
 dirs-next = "2.0.0"
+chrono = "0.4"

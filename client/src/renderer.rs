@@ -1,9 +1,10 @@
 use colored::*;
 use std::io::{self, Write};
 use std::collections::HashMap;
+use chrono::{DateTime, Utc, TimeZone, Timelike};
 
 use crate::game_protocol::{Player, Position};
-use crate::game_state::GameState;
+use crate::game_state::{GameState, ChatMessage};
 
 /// Clear the terminal screen
 pub fn clear_screen() {
@@ -95,6 +96,59 @@ pub fn render_mini_map(state: &GameState, player_pos: &Position) {
     }
 }
 
+/// Format a timestamp as a readable time string (HH:MM:SS)
+fn format_timestamp(timestamp: u64) -> String {
+    // Convert milliseconds timestamp to DateTime<Utc>
+    let dt = match Utc.timestamp_millis_opt(timestamp as i64) {
+        chrono::LocalResult::Single(dt) => dt,
+        _ => return "[??:??:??]".to_string(),
+    };
+    
+    // Format as HH:MM:SS
+    format!("[{:02}:{:02}:{:02}]", dt.hour(), dt.minute(), dt.second())
+}
+
+/// Render the chat history in a dedicated area
+pub fn render_chat_history(state: &GameState, max_messages: usize) {
+    println!("{}", "===== Chat History =====".cyan().bold());
+    
+    // Get recent messages (limited to max_messages)
+    let messages = state.recent_chat_messages(max_messages);
+    
+    if messages.is_empty() {
+        println!("{}", "No messages yet.".italic());
+    } else {
+        for msg in messages {
+            let time_str = format_timestamp(msg.timestamp);
+            
+            // Format based on sender type
+            match msg.sender.as_str() {
+                "System" => {
+                    println!("{} {}", time_str.yellow(), msg.content.yellow());
+                },
+                "System Error" => {
+                    println!("{} {}", time_str.yellow(), msg.content.red().bold());
+                },
+                sender if Some(sender) == state.player_id.as_deref() => {
+                    // Current player's messages
+                    println!("{} {} {}", 
+                             time_str.blue(), 
+                             format!("[You]:").blue().bold(), 
+                             msg.content.white());
+                },
+                _ => {
+                    // Other players' messages
+                    println!("{} {} {}", 
+                             time_str.green(), 
+                             format!("[{}]:", msg.sender).green().bold(), 
+                             msg.content.white());
+                }
+            }
+        }
+    }
+    println!("{}", "======================".cyan());
+}
+
 /// Render the current game state to the terminal
 pub fn render_game_state(state: &GameState) {
     clear_screen();
@@ -177,6 +231,11 @@ pub fn render_game_state(state: &GameState) {
         println!("  chat <message> - Send a message to all players");
     }
     println!("  exit - Quit the game");
+    
+    // Render chat history (showing last 10 messages)
+    println!("");
+    render_chat_history(state, 10);
+    
     print!("\n> ");
     io::stdout().flush().unwrap();
 }

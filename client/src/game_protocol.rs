@@ -34,7 +34,7 @@ pub enum ClientMessage {
 }
 
 // Message types that the server can send to the client
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     // Confirms registration and provides the player ID
     RegisterAck { player_id: String },

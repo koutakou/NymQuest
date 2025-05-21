@@ -1,7 +1,14 @@
-use std::collections::HashMap;
-use std::time::Instant;
+use std::collections::{HashMap, VecDeque};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::game_protocol::Player;
+
+/// Represents a chat message with sender, content and timestamp
+pub struct ChatMessage {
+    pub sender: String,
+    pub content: String,
+    pub timestamp: u64,
+}
 
 /// Structure to hold client state
 pub struct GameState {
@@ -9,6 +16,10 @@ pub struct GameState {
     pub players: HashMap<String, Player>,
     pub is_typing: bool,
     pub last_update: Instant,
+    /// Chat history with most recent messages at the end
+    pub chat_history: VecDeque<ChatMessage>,
+    /// Maximum number of chat messages to store in history
+    pub max_chat_history: usize,
 }
 
 impl GameState {
@@ -19,6 +30,8 @@ impl GameState {
             players: HashMap::new(),
             is_typing: false,
             last_update: Instant::now(),
+            chat_history: VecDeque::with_capacity(50),
+            max_chat_history: 50,
         }
     }
 
@@ -52,5 +65,37 @@ impl GameState {
     /// Set the typing state
     pub fn set_typing(&mut self, is_typing: bool) {
         self.is_typing = is_typing;
+    }
+    
+    /// Add a new chat message to the history
+    pub fn add_chat_message(&mut self, sender: String, content: String) {
+        // Get current timestamp in milliseconds
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+        
+        // Create a new chat message
+        let message = ChatMessage {
+            sender,
+            content,
+            timestamp,
+        };
+        
+        // Add to history (most recent at the end)
+        self.chat_history.push_back(message);
+        
+        // Ensure we don't exceed the maximum history size
+        while self.chat_history.len() > self.max_chat_history {
+            self.chat_history.pop_front();
+        }
+    }
+    
+    /// Get a slice of the most recent chat messages
+    pub fn recent_chat_messages(&self, count: usize) -> Vec<&ChatMessage> {
+        let history_len = self.chat_history.len();
+        let start_idx = if count >= history_len { 0 } else { history_len - count };
+        
+        self.chat_history.iter().skip(start_idx).collect()
     }
 }

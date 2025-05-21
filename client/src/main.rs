@@ -285,10 +285,12 @@ async fn run_event_loop(
             },
             // Process incoming messages from the server
             Some(server_message) = network.receive_message() => {
-                process_server_message(game_state, server_message);
-                // Only refresh if not typing
+                // Process the message and get whether it was a chat message
+                let was_chat = process_server_message(game_state, server_message);
+                
+                // Always refresh the display when we receive a chat message, even if typing
                 let state = game_state.lock().unwrap();
-                if !state.is_typing {
+                if was_chat || !state.is_typing {
                     render_game_state(&state);
                 }
             },
@@ -302,14 +304,16 @@ async fn run_event_loop(
 }
 
 /// Process a message received from the server
-fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: ServerMessage) {
+/// Returns true if the message was a chat message that should refresh the display
+fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: ServerMessage) -> bool {
     let mut state = game_state.lock().unwrap();
     
-    match server_message {
+    let needs_refresh = match server_message.clone() {
         ServerMessage::RegisterAck { player_id } => {
             state.set_player_id(player_id);
             println!("{}", "Registration successful!".green().bold());
             render_game_state(&state);
+            false
         },
         ServerMessage::GameState { players } => {
             // Debugging output
@@ -325,15 +329,29 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
             
             // Render game state immediately to update the mini-map
             render_game_state(&state);
+            false
         },
         ServerMessage::Event { message } => {
+            // Add events to chat history as system messages
+            state.add_chat_message("System".to_string(), message.clone());
             println!("{} {}", "Event:".yellow().bold(), message.yellow());
+            true
         },
         ServerMessage::ChatMessage { sender_name, message } => {
+            // Add message to chat history
+            state.add_chat_message(sender_name.clone(), message.clone());
+            
+            // Also print it for immediate visibility
             println!("[{}]: {}", sender_name.green(), message.white());
+            true
         },
         ServerMessage::Error { message } => {
+            // Add errors to chat history as system messages
+            state.add_chat_message("System Error".to_string(), message.clone());
             println!("{} {}", "Error:".red().bold(), message.red());
+            true
         }
-    }
+    };
+    
+    needs_refresh
 }
