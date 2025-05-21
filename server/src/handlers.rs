@@ -34,39 +34,93 @@ fn next_seq_num() -> u64 {
     }
 }
 
+// Structure to manage replay protection using a sliding window approach
+struct ReplayProtectionWindow {
+    // Highest sequence number seen so far
+    highest_seq: u64,
+    // Bitmap window to track received sequence numbers below the highest
+    // Each bit represents whether we've seen (highest_seq - bit_position) 
+    window: u128,
+    // Window size - how many previous sequence numbers we track
+    window_size: u8,
+}
+
+impl ReplayProtectionWindow {
+    // Create a new replay protection window
+    fn new(window_size: u8) -> Self {
+        // window_size should be at most 128 (size of u128 in bits)
+        let window_size = std::cmp::min(window_size, 128);
+        ReplayProtectionWindow {
+            highest_seq: 0,
+            window: 0,
+            window_size,
+        }
+    }
+    
+    // Process a sequence number and determine if it's a replay
+    // Returns true if the message is a replay, false if it's new
+    fn process(&mut self, seq_num: u64) -> bool {
+        // If the sequence number is higher than what we've seen, it's definitely not a replay
+        if seq_num > self.highest_seq {
+            // Calculate how much the window needs to slide
+            let shift = std::cmp::min((seq_num - self.highest_seq) as u8, self.window_size);
+            
+            // Shift the window to accommodate the new highest sequence number
+            self.window = self.window << shift;
+            
+            // Mark the highest_seq (bit 0) as seen
+            self.window |= 1;
+            
+            // Update the highest sequence number
+            self.highest_seq = seq_num;
+            
+            return false; // Not a replay
+        }
+        
+        // If the sequence number is the same as highest, it's a replay
+        if seq_num == self.highest_seq {
+            return true; // Replay
+        }
+        
+        // Check if the sequence number is within our window
+        let offset = self.highest_seq - seq_num;
+        
+        // If it's too old (outside our window), we consider it a replay for safety
+        if offset as u8 > self.window_size {
+            return true; // Too old, consider it a replay
+        }
+        
+        // Check if we've already seen this sequence number
+        let mask = 1u128 << (offset as u8);
+        if (self.window & mask) != 0 {
+            return true; // Already seen, it's a replay
+        }
+        
+        // Mark this sequence number as seen
+        self.window |= mask;
+        
+        false // Not a replay
+    }
+}
+
 // Tracking received client messages to prevent replays
 lazy_static::lazy_static! {
-    static ref RECEIVED_CLIENT_MSGS: Mutex<HashMap<String, HashSet<u64>>> = Mutex::new(HashMap::new());
+    static ref REPLAY_PROTECTION: Mutex<HashMap<String, ReplayProtectionWindow>> = Mutex::new(HashMap::new());
 }
 
 // Check if we've seen this message before (replay protection)
 fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
     let tag_str = tag.to_string();
-    let mut received = RECEIVED_CLIENT_MSGS.lock().unwrap();
+    let mut protection = REPLAY_PROTECTION.lock().unwrap();
     
-    // Get or create the set for this client
-    let client_msgs = received.entry(tag_str).or_insert_with(HashSet::new);
+    // Get or create the replay protection window for this client
+    let window = protection.entry(tag_str).or_insert_with(|| {
+        // Window size of 64 means we track the last 64 sequence numbers
+        ReplayProtectionWindow::new(64)
+    });
     
-    // Check if we've seen this sequence number
-    if client_msgs.contains(&seq_num) {
-        true
-    } else {
-        // Record this sequence number
-        client_msgs.insert(seq_num);
-        
-        // Prune old sequence numbers to avoid unbounded growth
-        if client_msgs.len() > 1000 {
-            // Keep only the 500 highest sequence numbers
-            let mut seqs: Vec<_> = client_msgs.iter().cloned().collect();
-            seqs.sort_unstable_by(|a, b| b.cmp(a)); // Descending order
-            seqs.truncate(500);
-            
-            // Create a new set with just these sequence numbers
-            *client_msgs = seqs.into_iter().collect();
-        }
-        
-        false
-    }
+    // Check and update the window
+    window.process(seq_num)
 }
 
 /// Send an acknowledgment for a client message
