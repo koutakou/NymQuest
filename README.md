@@ -46,8 +46,8 @@ The project consists of two main components:
 
 1. Clone the repository:
    ```
-   git clone https://github.com/yourusername/nym-mmorpg.git
-   cd nym-mmorpg
+   git clone https://github.com/koutakou/NymQuest
+   cd NymQuest
    ```
 
 2. Build the server:
@@ -85,17 +85,28 @@ The project consists of two main components:
 4. Use the following commands in the client:
    - Move: `/move up`, `/move down`, `/move left`, `/move right`
    - Chat: `/chat Hello everyone!`
-   - Attack: `/attack player_id`
+   - Attack: `/attack player_display_id` (use the ID in [brackets], not the player name)
    - Disconnect: `/quit`
 
 ## Privacy Benefits
 
-NYM-MMORPG demonstrates several key privacy benefits:
+NymQuest demonstrates several key privacy benefits:
 
 1. **Network-Level Privacy**: All game communications are protected by Nym's mixnet, preventing traffic analysis
 2. **Metadata Protection**: The timing and frequency of game actions are obfuscated
 3. **Anonymous Authentication**: Players can participate without revealing their real identity
 4. **Decentralized Architecture**: No central server needs to be trusted with player data
+
+## Combat System
+
+NymQuest features a simple but engaging combat system:
+
+- **Attack Range**: Players can attack others within 28.0 units of distance
+- **Cooldown System**: 3-second cooldown between attacks
+- **Health**: Players start with 100 health points
+- **Damage**: Base attack deals 10 damage points
+- **Critical Hits**: 15% chance to land a critical hit doing double damage (20 points)
+- **Respawn**: Defeated players respawn with full health at a random position
 
 ## Future Roadmap
 

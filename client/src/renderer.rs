@@ -6,11 +6,11 @@ use chrono::{DateTime, Utc, TimeZone, Timelike};
 use crate::game_protocol::{Player, Position};
 use crate::game_state::{GameState, ChatMessage};
 
-// Constants for critical hit detection in messages
+/// Constants for critical hit detection in messages
 const CRITICAL_HIT_MARKER: &str = "CRITICAL HIT";
 const CRITICAL_HIT_ALT_MARKER: &str = "critical hit";
 
-// Define game world boundaries
+/// Define game world boundaries
 const WORLD_MIN_X: f32 = -100.0;
 const WORLD_MAX_X: f32 = 100.0;
 const WORLD_MIN_Y: f32 = -100.0;
@@ -23,8 +23,13 @@ pub fn clear_screen() {
 }
 
 /// Render a mini-map of the game world
+/// 
+/// This function creates a scaled-down representation of the game world with the following features:
+/// - The current player is represented as '@' (green)
+/// - Other players are represented as 'O' (yellow)
+/// - Game world coordinates (-100 to 100) are scaled to fit the mini-map
 pub fn render_mini_map(state: &GameState, _player_pos: &Position) {
-    const MAP_SIZE: usize = 15; // Increased size for better visibility
+    const MAP_SIZE: usize = 15; // Size of the mini-map (15x15 characters)
     
     println!("{}", "Mini-map: (You are '@', others are 'O'):".cyan().bold());
     

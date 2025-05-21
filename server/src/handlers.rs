@@ -327,7 +327,7 @@ async fn handle_attack(
         }
         
         // Check if attacker and target are within range
-        const ATTACK_RANGE: f32 = 28.0; // Maximum attack range (2 cases * 14.0 units per case)
+        const ATTACK_RANGE: f32 = 28.0; // Maximum attack range in world units
         
         let attacker_pos = match game_state.get_player(&attacker_id) {
             Some(player) => player.position,

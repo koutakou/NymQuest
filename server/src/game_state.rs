@@ -170,6 +170,9 @@ impl GameState {
     }
     
     /// Apply damage to a player
+    /// 
+    /// If health drops to zero, the player is reset with full health (100 HP) at a random position.
+    /// Returns true if the player was defeated (health reached zero).
     pub fn apply_damage(&self, target_id: &str, damage: u32) -> bool {
         let mut target_defeated = false;
         
@@ -201,6 +204,9 @@ impl GameState {
     }
 
     /// Check if a player can attack (not on cooldown)
+    /// 
+    /// Combat system uses a cooldown period (typically 3 seconds) between attacks.
+    /// Returns true if enough time has passed since the player's last attack.
     pub fn can_attack(&self, player_id: &str, current_time: u64, cooldown: u64) -> bool {
         let state = self.players.lock().unwrap();
         if let Some(player) = state.get(player_id) {
