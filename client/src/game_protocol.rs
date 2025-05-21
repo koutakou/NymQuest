@@ -36,7 +36,8 @@ impl Position {
 // Player representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Player {
-    pub id: String,
+    pub id: String,          // Internal server ID (UUID) - not exposed to other clients
+    pub display_id: String,  // Public privacy-preserving identifier (e.g. "Player1")
     pub position: Position,
     pub health: u32,
     pub name: String,
@@ -50,8 +51,8 @@ pub enum ClientMessage {
     Register { name: String, seq_num: u64 },
     // Message to move in the game world
     Move { direction: Direction, seq_num: u64 },
-    // Message to attack another player
-    Attack { target_id: String, seq_num: u64 },
+    // Message to attack another player (using display_id for privacy)
+    Attack { target_display_id: String, seq_num: u64 },
     // Message to send chat to all players
     Chat { message: String, seq_num: u64 },
     // Message to leave the game

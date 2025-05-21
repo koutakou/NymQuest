@@ -238,8 +238,9 @@ pub fn render_game_state(state: &GameState) {
                         player.name.normal()
                     };
                     
-                    println!("  {}: At ({:.1}, {:.1}), Health: {}", 
+                    println!("  {} [{}]: At ({:.1}, {:.1}), Health: {}", 
                         player_name,
+                        player.display_id.cyan(), // Display the anonymized ID in cyan
                         player.position.x, player.position.y, 
                         player.health);
                 }
@@ -255,7 +256,7 @@ pub fn render_game_state(state: &GameState) {
     if state.player_id.is_some() {
         println!("  move <direction> - Move your character one cell on the map");
         println!("    (use cardinal: n,s,e,w or diagonal: ne,nw,se,sw or arrows: up,down,left,right)");
-        println!("  attack <player_id> - Attack another player");
+        println!("  attack <player_display_id> - Attack another player using their display ID (shown in [brackets])");
         println!("  chat <message> - Send a message to all players");
     }
     println!("  exit - Quit the game");

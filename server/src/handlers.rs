@@ -170,8 +170,8 @@ pub async fn handle_client_message(
         ClientMessage::Move { direction, .. } => {
             handle_move(client, game_state, direction, sender_tag).await
         },
-        ClientMessage::Attack { target_id, .. } => {
-            handle_attack(client, game_state, target_id, sender_tag).await
+        ClientMessage::Attack { target_display_id, .. } => {
+            handle_attack(client, game_state, target_display_id, sender_tag).await
         },
         ClientMessage::Chat { message, .. } => {
             handle_chat(client, game_state, message, sender_tag).await
@@ -280,29 +280,44 @@ async fn handle_move(
 async fn handle_attack(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
-    target_id: String,
+    target_display_id: String,
     sender_tag: AnonymousSenderTag
 ) -> Result<()> {
     // Find the attacker ID from sender tag
     if let Some(attacker_id) = game_state.get_player_id(&sender_tag) {
-        // Get current time for cooldown check
+        // Convert target display ID to real ID
+        let target_id = match game_state.get_player_id_by_display_id(&target_display_id) {
+            Some(id) => id,
+            None => {
+                // Target display ID doesn't exist
+                let error = ServerMessage::Error { 
+                    message: format!("Attack failed: Player '{}' not found.", target_display_id),
+                    seq_num: next_seq_num(),
+                };
+                let message = serde_json::to_string(&error)?;
+                client.send_reply(sender_tag.clone(), message).await?;
+                return Ok(());
+            }
+        };
+        
+        println!("Player {} attacking player with display ID {}", attacker_id, target_display_id);
+        
+        // Get current time
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        
-        // Define attack cooldown
+            
+        // Cooldown in seconds
         const ATTACK_COOLDOWN: u64 = 3;
         
-        // Check if the player can attack (not on cooldown)
+        // Check if the player is on cooldown
         if !game_state.can_attack(&attacker_id, now, ATTACK_COOLDOWN) {
-            // Player is still on cooldown
-            let remaining = ATTACK_COOLDOWN - 
-                (now - game_state.get_player(&attacker_id)
-                    .map_or(0, |p| p.last_attack_time));
-            
+            // Send an error message if on cooldown
             let cooldown_msg = ServerMessage::Error { 
-                message: format!("Attack on cooldown! Wait {} more seconds.", remaining),
+                message: format!("Attack on cooldown! Wait {} more seconds.", ATTACK_COOLDOWN - 
+                    (now - game_state.get_player(&attacker_id)
+                        .map_or(0, |p| p.last_attack_time))),
                 seq_num: next_seq_num(),
             };
             let message = serde_json::to_string(&cooldown_msg)?;
@@ -310,22 +325,105 @@ async fn handle_attack(
             return Ok(());
         }
         
+        // Check if attacker and target are within range
+        const ATTACK_RANGE: f32 = 28.0; // Maximum attack range (2 cases * 14.0 units per case)
+        
+        let attacker_pos = match game_state.get_player(&attacker_id) {
+            Some(player) => player.position,
+            None => {
+                // This shouldn't happen but handle it anyway
+                let error = ServerMessage::Error { 
+                    message: "Attack failed: Unable to find your player.".to_string(),
+                    seq_num: next_seq_num(),
+                };
+                let message = serde_json::to_string(&error)?;
+                client.send_reply(sender_tag.clone(), message).await?;
+                return Ok(());
+            }
+        };
+        
+        let target_pos = match game_state.get_player(&target_id) {
+            Some(player) => player.position,
+            None => {
+                // Target doesn't exist
+                let error = ServerMessage::Error { 
+                    message: "Attack failed: Target does not exist.".to_string(),
+                    seq_num: next_seq_num(),
+                };
+                let message = serde_json::to_string(&error)?;
+                client.send_reply(sender_tag.clone(), message).await?;
+                return Ok(());
+            }
+        };
+        
+        // Calculate distance between attacker and target
+        let distance = attacker_pos.distance_to(&target_pos);
+        
+        if distance > ATTACK_RANGE {
+            // Target is out of range
+            let error = ServerMessage::Error { 
+                message: format!("Attack failed: Target is out of range ({:.1} > {:.1}).", distance, ATTACK_RANGE),
+                seq_num: next_seq_num(),
+            };
+            let message = serde_json::to_string(&error)?;
+            client.send_reply(sender_tag.clone(), message).await?;
+            return Ok(());
+        }
+        
         // Update the last attack time
         game_state.update_attack_time(&attacker_id, now);
+        
+        // Get target player's name and sender tag for notification
+        let (target_name, target_tag) = {
+            let connections = game_state.get_connections();
+            let mut target_name = "Unknown".to_string();
+            let mut target_tag = None;
+            
+            // Find the target's connection
+            for (id, tag) in connections {
+                if id == target_id {
+                    if let Some(player) = game_state.get_player(&id) {
+                        target_name = player.name.clone();
+                    }
+                    target_tag = Some(tag);
+                    break;
+                }
+            }
+            
+            (target_name, target_tag)
+        };
+        
+        // Get attacker's name for the notification
+        let attacker_name = game_state.get_player(&attacker_id)
+            .map(|p| p.name.clone())
+            .unwrap_or("Unknown".to_string());
         
         // Apply damage to the target
         let damage = 10;
         let target_defeated = game_state.apply_damage(&target_id, damage);
         
-        if target_defeated {
-            // Send an event to the attacker
-            let event = ServerMessage::Event { 
-                message: format!("Player {} has been defeated!", target_id),
+        // Notify the target player they're being attacked
+        if let Some(tag) = target_tag {
+            // Create attack notification for target player
+            let attack_notification = ServerMessage::Event {
+                message: format!("⚠️ You are being attacked by {}! You lost {} health points.", attacker_name, damage),
                 seq_num: next_seq_num(),
             };
-            let message = serde_json::to_string(&event)?;
-            client.send_reply(sender_tag.clone(), message).await?;
+            let notification_msg = serde_json::to_string(&attack_notification)?;
+            client.send_reply(tag, notification_msg).await?;
         }
+        
+        // Send notification to the attacker
+        let attacker_notification = ServerMessage::Event {
+            message: if target_defeated {
+                format!("You defeated {}!", target_name)
+            } else {
+                format!("You hit {} for {} damage!", target_name, damage)
+            },
+            seq_num: next_seq_num(),
+        };
+        let attacker_msg = serde_json::to_string(&attacker_notification)?;
+        client.send_reply(sender_tag.clone(), attacker_msg).await?;
         
         // This event is now sent in the move handler itself, we don't need to send it again here
         

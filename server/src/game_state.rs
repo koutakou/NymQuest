@@ -43,10 +43,18 @@ impl GameState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
+        
+        // Generate a privacy-preserving display ID
+        // This will be a simple format like "Player1", "Player2", etc.
+        let display_id = {
+            let mut state = self.players.lock().unwrap();
+            format!("Player{}", state.len() + 1)
+        };
             
         // Create a new player with the available position
         let player = Player {
             id: player_id.clone(),
+            display_id,
             name,
             position: available_position,
             health: 100,
@@ -109,9 +117,22 @@ impl GameState {
         self.players.lock().unwrap().clone()
     }
 
-    /// Get a specific player
+    /// Get a specific player by their internal ID
     pub fn get_player(&self, player_id: &str) -> Option<Player> {
         self.players.lock().unwrap().get(player_id).cloned()
+    }
+    
+    /// Find a player's internal ID from their display ID
+    pub fn get_player_id_by_display_id(&self, display_id: &str) -> Option<String> {
+        let players = self.players.lock().unwrap();
+        
+        for (id, player) in players.iter() {
+            if player.display_id == display_id {
+                return Some(id.clone());
+            }
+        }
+        
+        None
     }
 
     /// Update a player's position

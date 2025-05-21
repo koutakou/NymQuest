@@ -27,7 +27,7 @@ const MAX_RETRIES: usize = 3;
 pub enum OriginalMessage {
     Register { name: String },
     Move { direction: Direction },
-    Attack { target_id: String },
+    Attack { target_display_id: String },
     Chat { message: String },
     Disconnect,
 }
@@ -105,8 +105,8 @@ impl NetworkManager {
                 ClientMessage::Move { direction, .. } => {
                     ClientMessage::Move { direction, seq_num: self.next_seq_num }
                 },
-                ClientMessage::Attack { target_id, .. } => {
-                    ClientMessage::Attack { target_id, seq_num: self.next_seq_num }
+                ClientMessage::Attack { target_display_id, .. } => {
+                    ClientMessage::Attack { target_display_id, seq_num: self.next_seq_num }
                 },
                 ClientMessage::Chat { message, .. } => {
                     ClientMessage::Chat { message, seq_num: self.next_seq_num }
@@ -136,8 +136,8 @@ impl NetworkManager {
                 ClientMessage::Move { direction, .. } => {
                     OriginalMessage::Move { direction: *direction }
                 },
-                ClientMessage::Attack { target_id, .. } => {
-                    OriginalMessage::Attack { target_id: target_id.clone() }
+                ClientMessage::Attack { target_display_id, .. } => {
+                    OriginalMessage::Attack { target_display_id: target_display_id.clone() }
                 },
                 ClientMessage::Chat { message, .. } => {
                     OriginalMessage::Chat { message: message.clone() }
@@ -233,10 +233,10 @@ impl NetworkManager {
                             seq_num 
                         }
                     },
-                    OriginalMessage::Attack { target_id } => {
-                        println!("Resending Attack with original target: {}", target_id);
+                    OriginalMessage::Attack { target_display_id } => {
+                        println!("Resending Attack with original target: {}", target_display_id);
                         ClientMessage::Attack { 
-                            target_id: target_id.clone(), 
+                            target_display_id: target_display_id.clone(), 
                             seq_num 
                         }
                     },
@@ -271,7 +271,7 @@ impl NetworkManager {
                     },
                     ClientMessageType::Attack => {
                         ClientMessage::Attack { 
-                            target_id: format!("unknown_{}", seq_num), 
+                            target_display_id: format!("unknown_{}", seq_num), 
                             seq_num 
                         }
                     },

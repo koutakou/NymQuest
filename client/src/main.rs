@@ -250,18 +250,18 @@ async fn process_user_command(
             }
             
             if command_parts.len() < 2 {
-                println!("Usage: attack <player_id>");
+                println!("Usage: attack <player_display_id>");
                 return Ok(());
             }
             
-            let target_id = command_parts[1].to_string();
+            let target_display_id = command_parts[1].to_string();
             let attack_msg = ClientMessage::Attack { 
-                target_id,
+                target_display_id: target_display_id.clone(),
                 seq_num: 0  // Will be set by NetworkManager
             };
             
             network.send_message(attack_msg).await?;
-            println!("Attack request sent...");
+            println!("Attack request sent to player '{}'...", target_display_id);
         },
         "chat" => {
             // Check if player is registered
