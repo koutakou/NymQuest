@@ -96,6 +96,7 @@ NymQuest demonstrates several key privacy benefits:
 2. **Metadata Protection**: The timing and frequency of game actions are obfuscated
 3. **Anonymous Authentication**: Players can participate without revealing their real identity
 4. **Decentralized Architecture**: No central server needs to be trusted with player data
+5. **Message Authentication**: All messages are cryptographically authenticated using HMAC-SHA256 to prevent tampering
 
 ## Combat System
 

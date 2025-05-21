@@ -2,6 +2,7 @@ mod game_protocol;
 mod game_state;
 mod network;
 mod renderer;
+mod message_auth;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;

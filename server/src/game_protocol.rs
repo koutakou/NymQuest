@@ -56,7 +56,7 @@ pub enum ClientMessageType {
 }
 
 // Message types that the client can send to the server
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     // Message to register in the game
     Register { name: String, seq_num: u64 },

@@ -17,3 +17,8 @@ colored = "2.0"
 rustyline = "10.0.0"
 dirs-next = "2.0.0"
 chrono = "0.4"
+# Added for message authentication
+hmac = "0.12"
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.21"

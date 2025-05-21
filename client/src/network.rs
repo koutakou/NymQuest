@@ -10,6 +10,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::time;
 
+// Import message authentication module
+use crate::message_auth::{AuthKey, AuthenticatedMessage};
+
 use crate::game_protocol::{ClientMessage, ServerMessage, ServerMessageType, ClientMessageType, Direction};
 
 /// Initial time to wait for an acknowledgement before first resend attempt
@@ -35,6 +38,7 @@ pub enum OriginalMessage {
 pub struct NetworkManager {
     client: Option<MixnetClient>,
     server_address: String,
+    auth_key: AuthKey,
     next_seq_num: u64,
     pending_acks: HashMap<u64, (Instant, ClientMessageType)>,
     received_server_msgs: HashSet<u64>,
@@ -46,11 +50,25 @@ pub struct NetworkManager {
 impl NetworkManager {
     /// Create a new NetworkManager and connect to the Nym network
     pub async fn new() -> Result<Self> {
-        // Read server address from file
-        let server_address = match fs::read_to_string("server_address.txt").or_else(|_| fs::read_to_string("../client/server_address.txt")) {
-            Ok(address) => address.trim().to_string(),
+        // Read server address and auth key from file
+        let file_content = match fs::read_to_string("server_address.txt").or_else(|_| fs::read_to_string("../client/server_address.txt")) {
+            Ok(content) => content.trim().to_string(),
             Err(_) => {
-                return Err(anyhow!("Cannot read server address from server_address.txt. Make sure the server is running and you have access to the address file."));
+                return Err(anyhow!("Cannot read server_address.txt. Make sure the server is running and you have access to the address file."));
+            }
+        };
+        
+        // Parse the file content to extract server address and auth key
+        let parts: Vec<&str> = file_content.split(';').collect();
+        if parts.len() != 2 {
+            return Err(anyhow!("Invalid format in server_address.txt. Expected 'address;auth_key' format."));
+        }
+        
+        let server_address = parts[0].trim().to_string();
+        let auth_key = match AuthKey::from_base64(parts[1].trim()) {
+            Ok(key) => key,
+            Err(e) => {
+                return Err(anyhow!("Failed to parse authentication key: {}", e));
             }
         };
         
@@ -74,6 +92,7 @@ impl NetworkManager {
         Ok(Self {
             client: Some(client),
             server_address,
+            auth_key,
             next_seq_num: 1,
             pending_acks: HashMap::new(),
             received_server_msgs: HashSet::new(),
@@ -85,9 +104,11 @@ impl NetworkManager {
     /// Send a message to the server with automatic sequencing and retry mechanism
     pub async fn send_message(&mut self, message: ClientMessage) -> Result<()> {
         if let Some(client) = &mut self.client {
-            // For Ack messages, just pass them through as they already have the correct sequence number
+            // For Ack messages, use the existing sequence number but still authenticate them
             if matches!(message, ClientMessage::Ack { .. }) {
-                let message_str = serde_json::to_string(&message)?;
+                // Create an authenticated message with HMAC
+                let authenticated_ack = AuthenticatedMessage::new(message, &self.auth_key)?;
+                let message_str = serde_json::to_string(&authenticated_ack)?;
                 
                 // Create recipient from server address
                 let recipient = Recipient::from_str(&self.server_address)
@@ -154,8 +175,9 @@ impl NetworkManager {
             // Increment sequence number for next message
             self.next_seq_num += 1;
             
-            // Serialize and send the message
-            let message_str = serde_json::to_string(&message_with_seq)?;
+            // Authenticate and serialize the message
+            let authenticated_message = AuthenticatedMessage::new(message_with_seq, &self.auth_key)?;
+            let message_str = serde_json::to_string(&authenticated_message)?;
             
             // Create recipient from server address
             let recipient = Recipient::from_str(&self.server_address)
@@ -291,16 +313,18 @@ impl NetworkManager {
                 }
             };
             
-            // Serialize and send the message
+            // Authenticate, serialize and send the message
             if let Some(client) = &mut self.client {
-                let message_str = serde_json::to_string(&message)?;
+                // Create an authenticated message with HMAC tag
+                let authenticated_message = AuthenticatedMessage::new(message, &self.auth_key)?;
+                let message_str = serde_json::to_string(&authenticated_message)?;
                 
                 // Create recipient from server address
                 let recipient = Recipient::from_str(&self.server_address)
                     .map_err(|e| anyhow!("Invalid server address: {}", e))?;
                 
                 client.send_message(recipient, message_str.into_bytes(), IncludedSurbs::default()).await?;
-                
+            
                 println!("Resending message {} of type {:?} (retry {})", 
                          seq_num, msg_type, self.retry_count.get(&seq_num).copied().unwrap_or(0));
             }
@@ -337,71 +361,97 @@ impl NetworkManager {
             }
         };
         
-        // Try to deserialize the message
-        match serde_json::from_str::<ServerMessage>(&message_str) {
-            Ok(server_message) => {
-                let seq_num = server_message.get_seq_num();
-                let msg_type = server_message.get_type();
-                
-                // Handle acknowledgements
-                if let ServerMessage::Ack { client_seq_num, original_type } = &server_message {
-                    // Remove from pending acks when we receive an ack
-                    if self.pending_acks.remove(client_seq_num).is_some() {
-                        println!("Received acknowledgment for message {} of type {:?}", client_seq_num, original_type);
-                        // Also remove retry count and original message
-                        self.retry_count.remove(client_seq_num);
-                        self.original_messages.remove(client_seq_num);
-                    }
-                    return None; // Don't pass Ack messages to the application
-                }
-                
-                // Check for implicit acknowledgment (e.g., RegisterAck acknowledges Register)
-                // When we receive non-ack messages like RegisterAck, they implicitly acknowledge
-                // the corresponding client message
-                if let Some(client_seq_num) = self.get_implicit_ack_seq(&server_message) {
-                    if self.pending_acks.remove(&client_seq_num).is_some() {
-                        println!("Implicit acknowledgment for message {}", client_seq_num);
-                        // Also remove retry count and original message
-                        self.retry_count.remove(&client_seq_num);
-                        self.original_messages.remove(&client_seq_num);
+        // First try to deserialize as an authenticated message
+        let server_message = match serde_json::from_str::<AuthenticatedMessage<ServerMessage>>(&message_str) {
+            Ok(authenticated_message) => {
+                // Verify message authenticity
+                match authenticated_message.verify(&self.auth_key) {
+                    Ok(true) => {
+                        // Message is authentic, extract the actual server message
+                        authenticated_message.message
+                    },
+                    Ok(false) => {
+                        println!("Warning: Received message failed authentication verification - possible tampering!");
+                        return None;
+                    },
+                    Err(e) => {
+                        println!("Error verifying message authenticity: {}", e);
+                        return None;
                     }
                 }
-                
-                // Check if we've already processed this message
-                if self.received_server_msgs.contains(&seq_num) {
-                    println!("Ignoring duplicate message with seq_num {}", seq_num);
-                    return None;
-                }
-                
-                // Send an acknowledgement for all non-Ack messages
-                let ack_message = ClientMessage::Ack {
-                    server_seq_num: seq_num,
-                    original_type: msg_type,
-                };
-                
-                // Send the acknowledgement (fire and forget)
-                if let Err(e) = self.send_message(ack_message).await {
-                    println!("Failed to send acknowledgement: {}", e);
-                }
-                
-                // Record that we've received this message
-                self.received_server_msgs.insert(seq_num);
-                
-                // Keep the set size manageable
-                if self.received_server_msgs.len() > 1000 {
-                    // Remove old sequence numbers (simpler than a proper order-preserving queue)
-                    // In a production system, you'd use a more sophisticated approach
-                    let threshold = seq_num.saturating_sub(500);
-                    self.received_server_msgs.retain(|&num| num >= threshold);
-                }
-                
-                Some(server_message)
             },
-            Err(e) => {
-                println!("Error deserializing server message: {}", e);
-                None
+            // If deserialization as authenticated message fails, try as regular message
+            Err(_) => {
+                match serde_json::from_str::<ServerMessage>(&message_str) {
+                    Ok(msg) => {
+                        println!("Received non-authenticated message (this is expected during transition)");
+                        msg
+                    },
+                    Err(e) => {
+                        println!("Error deserializing server message: {}", e);
+                        return None;
+                    }
+                }
+            }
+        };
+        
+        // Process the server message
+        let seq_num = server_message.get_seq_num();
+        let msg_type = server_message.get_type();
+                
+        // Handle acknowledgements
+        if let ServerMessage::Ack { client_seq_num, original_type } = &server_message {
+            // Remove from pending acks when we receive an ack
+            if self.pending_acks.remove(&client_seq_num).is_some() {
+                println!("Received acknowledgment for message {} of type {:?}", client_seq_num, original_type);
+                // Also remove retry count and original message
+                self.retry_count.remove(&client_seq_num);
+                self.original_messages.remove(&client_seq_num);
+            }
+            return None; // Don't pass Ack messages to the application
+        }
+                
+        // Check for implicit acknowledgment (e.g., RegisterAck acknowledges Register)
+        // When we receive non-ack messages like RegisterAck, they implicitly acknowledge
+        // the original message of that type
+        if let Some(implicit_ack_seq) = self.get_implicit_ack_seq(&server_message) {
+            if self.pending_acks.remove(&implicit_ack_seq).is_some() {
+                println!("Implicit acknowledgment received for message {}", implicit_ack_seq);
+                // Also remove retry count and original message
+                self.retry_count.remove(&implicit_ack_seq);
+                self.original_messages.remove(&implicit_ack_seq);
             }
         }
+        
+        // Check if we've already processed this message
+        if self.received_server_msgs.contains(&seq_num) {
+            println!("Ignoring duplicate message with seq_num {}", seq_num);
+            return None;
+        }
+        
+        // Send an acknowledgement for all non-Ack messages
+        let ack_message = ClientMessage::Ack {
+            server_seq_num: seq_num,
+            original_type: msg_type,
+        };
+        
+        // Send the acknowledgement (fire and forget)
+        if let Err(e) = self.send_message(ack_message).await {
+            println!("Failed to send acknowledgement: {}", e);
+        }
+        
+        // Record that we've received this message
+        self.received_server_msgs.insert(seq_num);
+        
+        // Keep the set size manageable
+        if self.received_server_msgs.len() > 1000 {
+            // Remove old sequence numbers (simpler than a proper order-preserving queue)
+            // In a production system, you'd use a more sophisticated approach
+            let threshold = seq_num.saturating_sub(500);
+            self.received_server_msgs.retain(|&num| num >= threshold);
+        }
+        
+        Some(server_message)
     }
     
     /// Disconnect from the Nym network

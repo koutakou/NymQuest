@@ -5,6 +5,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, HashSet};
 use rand::{thread_rng, Rng};
 
+use crate::message_auth::{AuthKey, AuthenticatedMessage};
+
 use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType};
 use crate::game_state::GameState;
 
@@ -127,7 +129,8 @@ fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
 async fn send_ack(
     client: &MixnetClient,
     sender_tag: &AnonymousSenderTag,
-    client_message: &ClientMessage
+    client_message: &ClientMessage,
+    auth_key: &AuthKey
 ) -> Result<()> {
     // Create acknowledgment
     let ack = ServerMessage::Ack {
@@ -135,9 +138,12 @@ async fn send_ack(
         original_type: client_message.get_type(),
     };
     
-    // Serialize and send
-    let message = serde_json::to_string(&ack)?;
-    client.send_reply(sender_tag.clone(), message).await?;
+    // Create an authenticated acknowledgment message
+    let authenticated_ack = AuthenticatedMessage::new(ack, auth_key)?;
+    
+    // Serialize and send the authenticated acknowledgment
+    let ack_json = serde_json::to_string(&authenticated_ack)?;
+    client.send_reply(sender_tag.clone(), ack_json).await?;
     
     Ok(())
 }
@@ -146,18 +152,21 @@ async fn send_ack(
 pub async fn broadcast_game_state(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
-    exclude_tag: Option<AnonymousSenderTag>
+    exclude_tag: Option<AnonymousSenderTag>,
+    auth_key: &AuthKey
 ) -> Result<()> {
     // Get the current game state
     let players = game_state.get_players();
     
-    // Create game state message with sequence number
-    let game_state_msg = ServerMessage::GameState { 
+    // Create the game state message
+    let game_state_message = ServerMessage::GameState {
         players,
         seq_num: next_seq_num(),
     };
     
-    let message = serde_json::to_string(&game_state_msg)?;
+    // Create an authenticated message with HMAC
+    let authenticated_message = AuthenticatedMessage::new(game_state_message, auth_key)?;
+    let serialized = serde_json::to_string(&authenticated_message)?;
     
     // Get a copy of all active connections
     let connections = game_state.get_connections();
@@ -175,7 +184,7 @@ pub async fn broadcast_game_state(
         }
         
         // Send the update to this player and track failures
-        if let Err(e) = client.send_reply(tag.clone(), message.clone()).await {
+        if let Err(e) = client.send_reply(tag.clone(), serialized.clone()).await {
             println!("Failed to send game state to player {}: {}", player_id, e);
             failed_tags.push(tag);
         }
@@ -196,7 +205,8 @@ pub async fn handle_client_message(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
     message: ClientMessage,
-    sender_tag: AnonymousSenderTag
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey
 ) -> Result<()> {
     // Get sequence number for replay protection and acknowledgments
     let seq_num = message.get_seq_num();
@@ -215,24 +225,24 @@ pub async fn handle_client_message(
     }
     
     // Send acknowledgment first for all non-ack messages
-    send_ack(client, &sender_tag, &message).await?;
+    send_ack(client, &sender_tag, &message, auth_key).await?;
     
     // Process the message based on its type
     match message {
         ClientMessage::Register { name, .. } => {
-            handle_register(client, game_state, name, sender_tag).await
+            handle_register(client, game_state, name, sender_tag, auth_key).await
         },
         ClientMessage::Move { direction, .. } => {
-            handle_move(client, game_state, direction, sender_tag).await
+            handle_move(client, game_state, direction, sender_tag, auth_key).await
         },
         ClientMessage::Attack { target_display_id, .. } => {
-            handle_attack(client, game_state, target_display_id, sender_tag).await
+            handle_attack(client, game_state, target_display_id, sender_tag, auth_key).await
         },
         ClientMessage::Chat { message, .. } => {
-            handle_chat(client, game_state, message, sender_tag).await
+            handle_chat(client, game_state, message, sender_tag, auth_key).await
         },
         ClientMessage::Disconnect { .. } => {
-            handle_disconnect(client, game_state, sender_tag).await
+            handle_disconnect(client, game_state, sender_tag, auth_key).await
         },
         ClientMessage::Ack { .. } => {
             // Already handled above
@@ -246,22 +256,27 @@ async fn handle_register(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
     name: String,
-    sender_tag: AnonymousSenderTag
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey
 ) -> Result<()> {
     // Add the player to the game state
     let player_id = game_state.add_player(name, sender_tag.clone());
     
-    // Send registration confirmation with sequence number
-    let register_ack = ServerMessage::RegisterAck { 
-        player_id: player_id.clone(), 
+    // Create a welcome message for this player
+    let register_ack = ServerMessage::RegisterAck {
+        player_id: player_id.clone(),
         seq_num: next_seq_num(),
     };
     
-    let message = serde_json::to_string(&register_ack)?;
-    client.send_reply(sender_tag.clone(), message).await?;
+    // Create an authenticated message
+    let authenticated_ack = AuthenticatedMessage::new(register_ack, auth_key)?;
+    let register_ack_json = serde_json::to_string(&authenticated_ack)?;
+    
+    // Send the registration confirmation to the new player
+    client.send_reply(sender_tag.clone(), register_ack_json).await?;
     
     // Broadcast updated game state to all players
-    broadcast_game_state(client, game_state, None).await?;
+    broadcast_game_state(client, game_state, None, auth_key).await?;
     
     println!("New player registered: {}", player_id);
     Ok(())
@@ -272,7 +287,8 @@ async fn handle_move(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
     direction: Direction,
-    sender_tag: AnonymousSenderTag
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey
 ) -> Result<()> {
     // Find the player ID from sender tag
     if let Some(player_id) = game_state.get_player_id(&sender_tag) {
@@ -303,18 +319,24 @@ async fn handle_move(
                     message: format!("Moved {:?} to position ({:.1}, {:.1})", direction, new_position.x, new_position.y),
                     seq_num: next_seq_num()
                 };
-                let confirm_msg = serde_json::to_string(&move_confirm)?;
+                
+                // Create an authenticated message
+                let authenticated_confirm = AuthenticatedMessage::new(move_confirm, auth_key)?;
+                let confirm_msg = serde_json::to_string(&authenticated_confirm)?;
                 client.send_reply(sender_tag.clone(), confirm_msg).await?;
                 
                 // Broadcast updated state to all players
-                broadcast_game_state(client, game_state, None).await?
+                broadcast_game_state(client, game_state, None, auth_key).await?
             } else {
                 // Movement failed (collision with another player or obstacle)
                 let error_msg = ServerMessage::Error { 
                     message: "Cannot move to that position - there's an obstacle or another player there".to_string(),
                     seq_num: next_seq_num()
                 };
-                let message = serde_json::to_string(&error_msg)?;
+                
+                // Create an authenticated message
+                let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+                let message = serde_json::to_string(&authenticated_error)?;
                 client.send_reply(sender_tag.clone(), message).await?;
             }
         } else {
@@ -323,7 +345,10 @@ async fn handle_move(
                 message: "You need to register before moving".to_string(),
                 seq_num: next_seq_num(),
             };
-            let message = serde_json::to_string(&error_msg)?;
+            
+            // Create an authenticated message
+            let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+            let message = serde_json::to_string(&authenticated_error)?;
             client.send_reply(sender_tag.clone(), message).await?;
         }
     }
@@ -336,7 +361,8 @@ async fn handle_attack(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
     target_display_id: String,
-    sender_tag: AnonymousSenderTag
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey
 ) -> Result<()> {
     // Find the attacker ID from sender tag
     if let Some(attacker_id) = game_state.get_player_id(&sender_tag) {
@@ -497,13 +523,16 @@ async fn handle_attack(
             },
             seq_num: next_seq_num(),
         };
-        let attacker_msg = serde_json::to_string(&attacker_notification)?;
+        
+        // Create an authenticated message
+        let authenticated_notification = AuthenticatedMessage::new(attacker_notification, auth_key)?;
+        let attacker_msg = serde_json::to_string(&authenticated_notification)?;
         client.send_reply(sender_tag.clone(), attacker_msg).await?;
         
         // This event is now sent in the move handler itself, we don't need to send it again here
         
         // Broadcast the updated game state to all players
-        broadcast_game_state(client, game_state, None).await?;
+        broadcast_game_state(client, game_state, None, auth_key).await?;
     }
     
     Ok(())
@@ -514,7 +543,8 @@ async fn handle_chat(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
     message: String,
-    sender_tag: AnonymousSenderTag
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey
 ) -> Result<()> {
     // Find the player ID from sender tag
     if let Some(sender_id) = game_state.get_player_id(&sender_tag) {
@@ -528,14 +558,20 @@ async fn handle_chat(
                 message: message.clone(),
                 seq_num: next_seq_num(),
             };
-            let serialized = serde_json::to_string(&chat_msg)?;
+            
+            // Create an authenticated chat message
+            let authenticated_chat = AuthenticatedMessage::new(chat_msg, auth_key)?;
+            let serialized = serde_json::to_string(&authenticated_chat)?;
             
             // Create confirmation message for the sender
             let confirm_msg = ServerMessage::Event {
                 message: format!("Your message has been sent: {}", message),
                 seq_num: next_seq_num(),
             };
-            let confirm_serialized = serde_json::to_string(&confirm_msg)?;
+            
+            // Create an authenticated confirmation message
+            let authenticated_confirm = AuthenticatedMessage::new(confirm_msg, auth_key)?;
+            let confirm_serialized = serde_json::to_string(&authenticated_confirm)?;
             
             // Send confirmation to the original sender
             if let Err(e) = client.send_reply(sender_tag.clone(), confirm_serialized).await {
@@ -544,16 +580,16 @@ async fn handle_chat(
                 println!("Confirmation sent to sender {}", sender_id);
             }
             
-            // Send to all other players
+            // Get a copy of all active connections
             let connections = game_state.get_connections();
             println!("Broadcasting chat to {} players", connections.len());
             
-            // Get sender tag as bytes for more reliable comparison
-            let sender_tag_bytes = sender_tag.to_string().into_bytes();
+            // Prepare exclude tag as bytes for more reliable comparison
+            let exclude_bytes = sender_tag.to_string().into_bytes();
             
             for (player_id, tag) in connections {
                 // Skip sending to the original sender by comparing the tag bytes
-                if tag.to_string().into_bytes() != sender_tag_bytes {
+                if tag.to_string().into_bytes() != exclude_bytes {
                     match client.send_reply(tag.clone(), serialized.clone()).await {
                         Ok(_) => {
                             println!("Chat message sent to player {}", player_id);
@@ -576,14 +612,15 @@ async fn handle_chat(
 async fn handle_disconnect(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
-    sender_tag: AnonymousSenderTag
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey
 ) -> Result<()> {
     // Remove the player
     if let Some(player_id) = game_state.remove_player(&sender_tag) {
         println!("Player {} disconnected", player_id);
         
         // Broadcast the updated game state to all remaining players
-        broadcast_game_state(client, game_state, None).await?;
+        broadcast_game_state(client, game_state, None, auth_key).await?;
     }
     
     Ok(())
