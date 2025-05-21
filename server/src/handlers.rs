@@ -3,6 +3,7 @@ use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, HashSet};
+use rand::{thread_rng, Rng};
 
 use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType};
 use crate::game_state::GameState;
@@ -398,11 +399,26 @@ async fn handle_attack(
             .map(|p| p.name.clone())
             .unwrap_or("Unknown".to_string());
         
-        // Apply damage to the target
-        let damage = 10;
+        // Apply damage
+        const BASE_DAMAGE: u32 = 10; // Base damage amount
+        const CRIT_CHANCE: f32 = 0.15; // 15% chance for critical hit
+        const CRIT_MULTIPLIER: f32 = 2.0; // Critical hits do 2x damage
+        
+        // Calculate if this is a critical hit
+        let mut rng = thread_rng();
+        let is_critical = rng.gen::<f32>() < CRIT_CHANCE;
+        
+        // Calculate final damage
+        let damage = if is_critical {
+            (BASE_DAMAGE as f32 * CRIT_MULTIPLIER) as u32
+        } else {
+            BASE_DAMAGE
+        };
+        
+        // Apply damage and check if target was defeated
         let target_defeated = game_state.apply_damage(&target_id, damage);
         
-        // Notify the target player they're being attacked
+        // Send notification to the target
         if let Some(tag) = target_tag {
             // Create attack notification for target player
             let attack_notification = ServerMessage::Event {
@@ -416,9 +432,14 @@ async fn handle_attack(
         // Send notification to the attacker
         let attacker_notification = ServerMessage::Event {
             message: if target_defeated {
-                format!("You defeated {}!", target_name)
+                format!("You defeated {}{}", 
+                    target_name, 
+                    if is_critical { " with a critical hit!" } else { "!" })
             } else {
-                format!("You hit {} for {} damage!", target_name, damage)
+                format!("You hit {} for {} damage{}", 
+                    target_name, 
+                    damage, 
+                    if is_critical { " (CRITICAL HIT!)" } else { "" })
             },
             seq_num: next_seq_num(),
         };

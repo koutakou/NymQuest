@@ -6,6 +6,10 @@ use chrono::{DateTime, Utc, TimeZone, Timelike};
 use crate::game_protocol::{Player, Position};
 use crate::game_state::{GameState, ChatMessage};
 
+// Constants for critical hit detection in messages
+const CRITICAL_HIT_MARKER: &str = "CRITICAL HIT";
+const CRITICAL_HIT_ALT_MARKER: &str = "critical hit";
+
 // Define game world boundaries
 const WORLD_MIN_X: f32 = -100.0;
 const WORLD_MAX_X: f32 = 100.0;
@@ -148,27 +152,39 @@ pub fn render_chat_history(state: &GameState, max_messages: usize) {
         for msg in messages {
             let time_str = format_timestamp(msg.timestamp);
             
+            // Check if message contains critical hit information
+            let is_critical = msg.content.contains(CRITICAL_HIT_MARKER) || 
+                             msg.content.contains(CRITICAL_HIT_ALT_MARKER);
+            
+            // Format the content with special handling for critical hits
+            let content_formatted = if is_critical {
+                // Highlight critical hit messages with bright red and bold text
+                msg.content.bright_red().bold()
+            } else {
+                msg.content.white()
+            };
+            
             // Format based on sender type
             match msg.sender.as_str() {
                 "System" => {
-                    println!("{} {}", time_str.yellow(), msg.content.yellow());
+                    println!("{} {}", time_str.yellow(), content_formatted);
                 },
                 "System Error" => {
-                    println!("{} {}", time_str.yellow(), msg.content.red().bold());
+                    println!("{} {}", time_str.yellow(), content_formatted.red().bold());
                 },
                 sender if Some(sender) == state.player_id.as_deref() => {
                     // Current player's messages
                     println!("{} {} {}", 
                              time_str.blue(), 
                              format!("[You]:").blue().bold(), 
-                             msg.content.white());
+                             content_formatted);
                 },
                 _ => {
                     // Other players' messages
                     println!("{} {} {}", 
                              time_str.green(), 
                              format!("[{}]:", msg.sender).green().bold(), 
-                             msg.content.white());
+                             content_formatted);
                 }
             }
         }
