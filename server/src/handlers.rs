@@ -202,17 +202,44 @@ async fn handle_chat(
         if let Some(player) = game_state.get_player(&sender_id) {
             let sender_name = player.name.clone();
             
-            // Create the chat message
+            // Create the chat message for other players
             let chat_msg = ServerMessage::ChatMessage {
                 sender_name: sender_name.clone(),
                 message: message.clone(),
             };
             let serialized = serde_json::to_string(&chat_msg)?;
             
-            // Send to all players except the sender
-            for (_, tag) in game_state.get_connections() {
-                if tag.to_string() != sender_tag.to_string() {
-                    let _ = client.send_reply(tag.clone(), serialized.clone()).await;
+            // Create confirmation message for the sender
+            let confirm_msg = ServerMessage::Event {
+                message: format!("Your message has been sent: {}", message),
+            };
+            let confirm_serialized = serde_json::to_string(&confirm_msg)?;
+            
+            // Send confirmation to the original sender
+            if let Err(e) = client.send_reply(sender_tag.clone(), confirm_serialized).await {
+                println!("Failed to send confirmation to sender {}: {}", sender_id, e);
+            } else {
+                println!("Confirmation sent to sender {}", sender_id);
+            }
+            
+            // Send to all other players
+            let connections = game_state.get_connections();
+            println!("Broadcasting chat to {} players", connections.len());
+            
+            // Get sender tag as bytes for more reliable comparison
+            let sender_tag_bytes = sender_tag.to_string().into_bytes();
+            
+            for (player_id, tag) in connections {
+                // Skip sending to the original sender by comparing the tag bytes
+                if tag.to_string().into_bytes() != sender_tag_bytes {
+                    match client.send_reply(tag.clone(), serialized.clone()).await {
+                        Ok(_) => {
+                            println!("Chat message sent to player {}", player_id);
+                        },
+                        Err(e) => {
+                            println!("Failed to send chat message to player {}: {}", player_id, e);
+                        }
+                    }
                 }
             }
             
