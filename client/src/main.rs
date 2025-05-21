@@ -251,13 +251,11 @@ async fn process_user_command(
             }
             
             // Perform proper network disconnection
-            println!("Disconnecting from Nym network...");
-            let network_instance = std::mem::replace(network, unsafe { std::mem::zeroed() });
-            tokio::spawn(async move {
-                network_instance.disconnect().await;
-            });
-            println!("Disconnected. Goodbye!");
+            if let Err(e) = network.disconnect().await {
+                println!("Error during disconnection: {}", e);
+            }
             
+            println!("Goodbye!");
             std::process::exit(0);
         },
         _ => {

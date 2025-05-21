@@ -10,7 +10,7 @@ use crate::game_protocol::{ClientMessage, ServerMessage};
 
 /// NetworkManager handles all interactions with the Nym mixnet
 pub struct NetworkManager {
-    client: MixnetClient,
+    client: Option<MixnetClient>,
     server_address: String,
 }
 
@@ -43,46 +43,54 @@ impl NetworkManager {
         println!("Connected to Nym network!");
         
         Ok(Self {
-            client,
+            client: Some(client),
             server_address,
         })
     }
     
     /// Send a message to the server
     pub async fn send_message(&mut self, message: ClientMessage) -> Result<()> {
-        let message_str = serde_json::to_string(&message)?;
-        
-        // Create recipient from server address
-        let recipient = Recipient::from_str(&self.server_address)
-            .map_err(|e| anyhow!("Invalid server address: {}", e))?;
-        
-        self.client.send_message(recipient, message_str.into_bytes(), IncludedSurbs::default()).await?;
-        
-        Ok(())
+        if let Some(client) = &mut self.client {
+            let message_str = serde_json::to_string(&message)?;
+            
+            // Create recipient from server address
+            let recipient = Recipient::from_str(&self.server_address)
+                .map_err(|e| anyhow!("Invalid server address: {}", e))?;
+            
+            client.send_message(recipient, message_str.into_bytes(), IncludedSurbs::default()).await?;
+            
+            Ok(())
+        } else {
+            Err(anyhow!("Client is not connected"))
+        }
     }
     
     /// Wait for the next message from the server
     pub async fn receive_message(&mut self) -> Option<ServerMessage> {
-        // Using the built-in next() method of MixnetClient
-        if let Some(received_message) = self.client.next().await {
-            if received_message.message.is_empty() {
-                return None;
-            }
-            
-            match String::from_utf8(received_message.message.clone()) {
-                Ok(message_str) => {
-                    match serde_json::from_str::<ServerMessage>(&message_str) {
-                        Ok(server_message) => Some(server_message),
-                        Err(e) => {
-                            println!("Error deserializing server message: {}", e);
-                            None
-                        }
-                    }
-                },
-                Err(e) => {
-                    println!("Error parsing message: {}", e);
-                    None
+        if let Some(client) = &mut self.client {
+            // Using the built-in next() method of MixnetClient
+            if let Some(received_message) = client.next().await {
+                if received_message.message.is_empty() {
+                    return None;
                 }
+                
+                match String::from_utf8(received_message.message.clone()) {
+                    Ok(message_str) => {
+                        match serde_json::from_str::<ServerMessage>(&message_str) {
+                            Ok(server_message) => Some(server_message),
+                            Err(e) => {
+                                println!("Error deserializing server message: {}", e);
+                                None
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        println!("Error parsing message: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
             }
         } else {
             None
@@ -90,14 +98,26 @@ impl NetworkManager {
     }
     
     /// Disconnect from the Nym network
-    pub async fn disconnect(self) {
-        println!("Disconnecting from Nym network...");
-        self.client.disconnect().await;
-        println!("Disconnected.");
+    pub async fn disconnect(&mut self) -> Result<()> {
+        if let Some(client) = self.client.take() {
+            println!("Disconnecting from Nym network...");
+            // Properly await the disconnection to ensure it completes
+            client.disconnect().await;
+            println!("Disconnected.");
+            Ok(())
+        } else {
+            println!("Already disconnected.");
+            Ok(())
+        }
     }
     
     /// Get a reference to the server address
     pub fn server_address(&self) -> &str {
         &self.server_address
+    }
+    
+    /// Check if the client is connected
+    pub fn is_connected(&self) -> bool {
+        self.client.is_some()
     }
 }
