@@ -6,6 +6,12 @@ use chrono::{DateTime, Utc, TimeZone, Timelike};
 use crate::game_protocol::{Player, Position};
 use crate::game_state::{GameState, ChatMessage};
 
+// Define game world boundaries
+const WORLD_MIN_X: f32 = -100.0;
+const WORLD_MAX_X: f32 = 100.0;
+const WORLD_MIN_Y: f32 = -100.0;
+const WORLD_MAX_Y: f32 = 100.0;
+
 /// Clear the terminal screen
 pub fn clear_screen() {
     print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
@@ -13,13 +19,24 @@ pub fn clear_screen() {
 }
 
 /// Render a mini-map of the game world
-pub fn render_mini_map(state: &GameState, player_pos: &Position) {
-    const MAP_SIZE: usize = 11; // Must be odd to have center for player
+pub fn render_mini_map(state: &GameState, _player_pos: &Position) {
+    const MAP_SIZE: usize = 15; // Increased size for better visibility
     
     println!("{}", "Mini-map: (You are '@', others are 'O'):".cyan().bold());
     
-    // Create an empty map grid with borders
+    // Debug info about world dimensions
+    println!("World boundaries: X: [{:.1}, {:.1}], Y: [{:.1}, {:.1}]", 
+             WORLD_MIN_X, WORLD_MAX_X, WORLD_MIN_Y, WORLD_MAX_Y);
+    
+    // Create an empty map grid with borders and light grid
     let mut map = vec![vec![' '; MAP_SIZE]; MAP_SIZE];
+    
+    // Draw light grid for better cell visualization
+    for y in 1..MAP_SIZE-1 {
+        for x in 1..MAP_SIZE-1 {
+            map[y][x] = '·'; // Light dot for grid points
+        }
+    }
     
     // Draw border
     for i in 0..MAP_SIZE {
@@ -35,51 +52,46 @@ pub fn render_mini_map(state: &GameState, player_pos: &Position) {
     map[MAP_SIZE-1][0] = '+';
     map[MAP_SIZE-1][MAP_SIZE-1] = '+';
     
-    // Define world bounds for the minimap
-    // Adjusted world coordinates based on actual game values
-    let world_min_x = 0.0;
-    let world_min_y = -100.0;
-    let world_max_x = 100.0;
-    let world_max_y = 100.0;
-    
     // Calculate scale factors to map world coordinates to minimap coordinates
-    let scale_x = (MAP_SIZE - 2) as f32 / (world_max_x - world_min_x) as f32;
-    let scale_y = (MAP_SIZE - 2) as f32 / (world_max_y - world_min_y) as f32;
+    let scale_x = (MAP_SIZE - 2) as f32 / (WORLD_MAX_X - WORLD_MIN_X);
+    let scale_y = (MAP_SIZE - 2) as f32 / (WORLD_MAX_Y - WORLD_MIN_Y);
     
-    // Place all players on the map based on their absolute position
-    for (id, player) in &state.players {
-        let x = player.position.x;
-        let y = player.position.y;
-        
-        // Convert world coordinates to map coordinates
-        let map_x = 1 + ((x - world_min_x as f32) * scale_x) as usize;
-        let map_y = 1 + ((y - world_min_y as f32) * scale_y) as usize;
-        
-        // Only place if within bounds and not on border
-        if map_x > 0 && map_x < MAP_SIZE-1 && map_y > 0 && map_y < MAP_SIZE-1 {
-            // Use different symbols for current player vs other players
-            if Some(id) == state.player_id.as_ref() {
-                map[map_y][map_x] = '@';
-            } else {
-                map[map_y][map_x] = 'O';
-            }
-        }
+    // Get current player from state
+    let current_player_id = state.player_id.clone();
+    
+    // Debug current player position if available
+    if let Some(current_player) = state.current_player() {
+        println!("Current player at: ({:.1}, {:.1})", 
+                 current_player.position.x, current_player.position.y);
     }
     
-    // Always display the current player at their position
-    println!("Player position: x={}, y={}", player_pos.x, player_pos.y);
-    
-    let player_map_x = 1 + ((player_pos.x - world_min_x as f32) * scale_x) as usize;
-    let player_map_y = 1 + ((player_pos.y - world_min_y as f32) * scale_y) as usize;
-    
-    println!("Calculated position on map: x={}, y={}", player_map_x, player_map_y);
-    
-    // Ensure position is within bounds
-    if player_map_x > 0 && player_map_x < MAP_SIZE-1 && player_map_y > 0 && player_map_y < MAP_SIZE-1 {
-        println!("Player is within map bounds!");
-        map[player_map_y][player_map_x] = '@';
-    } else {
-        println!("Player is OUT OF BOUNDS of the map!");
+    // Place all players on the map
+    for (id, player) in &state.players {
+        // Convert world coordinates to map coordinates
+        let norm_x = (player.position.x - WORLD_MIN_X) / (WORLD_MAX_X - WORLD_MIN_X);
+        let norm_y = (player.position.y - WORLD_MIN_Y) / (WORLD_MAX_Y - WORLD_MIN_Y);
+        
+        let map_x = (norm_x * (MAP_SIZE - 2) as f32) as usize + 1;
+        let map_y = (norm_y * (MAP_SIZE - 2) as f32) as usize + 1;
+        
+        // Safety check for map boundaries
+        let map_x = map_x.clamp(1, MAP_SIZE - 2);
+        let map_y = map_y.clamp(1, MAP_SIZE - 2);
+        
+        // Choose character based on whether this is the current player
+        let symbol = if Some(id) == current_player_id.as_ref() {
+            '@' // Current player
+        } else {
+            'O' // Other player
+        };
+        
+        // Place on map
+        map[map_y][map_x] = symbol;
+        
+        // Debug each player placement
+        println!("Player {}: World: ({:.1}, {:.1}) → Map: ({}, {}){}", 
+                 player.name, player.position.x, player.position.y, map_x, map_y,
+                 if Some(id) == current_player_id.as_ref() { " (YOU)" } else { "" });
     }
     
     // Draw the map with colors
@@ -94,6 +106,21 @@ pub fn render_mini_map(state: &GameState, player_pos: &Position) {
         }).collect();
         println!("  {}", colored_row);
     }
+    
+    // Display cardinal directions for orientation
+    println!("    N   ");
+    println!("  W + E ");
+    println!("    S   ");
+    
+    // Add information about movement scale
+    println!("");
+    println!("{}:", "Movement Help".cyan().bold());
+    println!("  Each {} command moves exactly one cell", "'move <direction>'".green().bold());
+    println!("  Valid directions: {}, {}, {}, {}", 
+             "cardinal (n,s,e,w)".yellow(), 
+             "diagonal (nw,ne,sw,se)".yellow(),
+             "arrows (up,down,left,right)".yellow(),
+             "shortcuts (u,d,l,r)".yellow());
 }
 
 /// Format a timestamp as a readable time string (HH:MM:SS)
@@ -226,7 +253,8 @@ pub fn render_game_state(state: &GameState) {
     println!("\nCommands:");
     println!("  register <n> - Register with the given name");
     if state.player_id.is_some() {
-        println!("  move <direction> - Move your character (up, down, left, right)");
+        println!("  move <direction> - Move your character one cell on the map");
+        println!("    (use cardinal: n,s,e,w or diagonal: ne,nw,se,sw or arrows: up,down,left,right)");
         println!("  attack <player_id> - Attack another player");
         println!("  chat <message> - Send a message to all players");
     }

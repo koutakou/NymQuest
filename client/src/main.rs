@@ -11,10 +11,10 @@ use rustyline::error::ReadlineError;
 use rustyline::Editor;
 use std::path::PathBuf;
 
-use game_protocol::{ClientMessage, ServerMessage, Direction};
+use game_protocol::{ClientMessage, ServerMessage, Direction, Position};
 use game_state::GameState;
 use network::NetworkManager;
-use renderer::render_game_state;
+use renderer::{render_game_state, clear_screen};
 
 /// Main entry point for the NYM MMORPG Client
 #[tokio::main]
@@ -182,21 +182,52 @@ async fn process_user_command(
             }
             
             if command_parts.len() < 2 {
-                println!("Usage: move <direction> (up, down, left, right)");
+                println!("Usage: move <direction> (up, down, left, right, ul, ur, dl, dr)");
                 return Ok(());
             }
             
-            // Parse direction
-            let direction = match command_parts[1].to_lowercase().as_str() {
-                "up" => Direction::Up,
-                "down" => Direction::Down,
-                "left" => Direction::Left,
-                "right" => Direction::Right,
-                _ => {
-                    println!("Invalid direction. Use up, down, left, or right.");
+            // Parse direction using the improved from_str method
+            let direction = match Direction::from_str(command_parts[1]) {
+                Some(dir) => dir,
+                None => {
+                    println!("Invalid direction. Valid options:\n\
+                      - Cardinal: up/u, down/d, left/l, right/r\n\
+                      - Diagonal: upleft/ul, upright/ur, downleft/dl, downright/dr\n\
+                      - Compass: north/n, south/s, east/e, west/w, northwest/nw, northeast/ne, southwest/sw, southeast/se");
                     return Ok(());
                 }
             };
+            
+            // Get current position to display movement prediction
+            let move_vector = direction.to_vector();
+            
+            // Create a block to limit the scope of the mutex lock
+            {
+                let mut state = game_state.lock().unwrap();
+                
+                // First, check if we have a player ID and clone it to avoid borrow issues
+                if let Some(player_id) = state.player_id.clone() {
+                    // Now get a mutable reference to the player
+                    if let Some(player) = state.players.get_mut(&player_id) {
+                        // Calculate and display predicted new position
+                        let mut predicted_pos = player.position;
+                        
+                        // Use the same mini_map_cell_size as the server (14.0 units)
+                        // This ensures one movement command = one cell on the mini-map
+                        let mini_map_cell_size = 14.0;
+                        predicted_pos.apply_movement(move_vector, mini_map_cell_size);
+                        
+                        clear_screen();
+                        println!("Moving {:?}", direction);
+                        println!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
+                        println!("Predicted position: ({:.1}, {:.1})", predicted_pos.x, predicted_pos.y);
+                        
+                        // Update position locally for responsive feedback
+                        // This will be corrected when we receive the next GameState update
+                        player.position = predicted_pos;
+                    }
+                }
+            }
             
             // Create and send move message
             let move_msg = ClientMessage::Move { direction };

@@ -108,24 +108,42 @@ async fn handle_move(
     if let Some(player_id) = game_state.get_player_id(&sender_tag) {
         // Get the current player information
         if let Some(player) = game_state.get_player(&player_id) {
-            // Calculate movement vector and new position
+            // Calculate movement vector
             let (dx, dy) = direction.to_vector();
-            let movement_speed = 5.0;
             
-            let new_position = Position {
-                x: player.position.x + dx * movement_speed,
-                y: player.position.y + dy * movement_speed,
+            // Calculate speed needed to move exactly one cell in the mini-map
+            // The mini-map is 15x15 with world boundaries of -100 to 100, so each cell represents about 14 units
+            let mini_map_cell_size = 14.0;
+            
+            // Apply movement vector to get new position
+            let mut new_position = Position {
+                x: player.position.x + dx * mini_map_cell_size,
+                y: player.position.y + dy * mini_map_cell_size,
             };
             
-            // Try to update the player's position
+            // Ensure the position stays within world boundaries
+            new_position.x = new_position.x.clamp(-100.0, 100.0);
+            new_position.y = new_position.y.clamp(-100.0, 100.0);
+            
+            // Try to update position
             if game_state.update_player_position(&player_id, new_position) {
-                println!("Player {} moved to position ({}, {})", 
-                    player_id, new_position.x, new_position.y);
+                // Movement was successful
+                // Provide immediate feedback to the player who moved
+                let move_confirm = ServerMessage::Event { 
+                    message: format!("Moved {:?} to position ({:.1}, {:.1})", direction, new_position.x, new_position.y) 
+                };
+                let confirm_msg = serde_json::to_string(&move_confirm)?;
+                client.send_reply(sender_tag.clone(), confirm_msg).await?;
                 
-                // Broadcast the updated game state to all players
-                broadcast_game_state(client, game_state, None).await?;
+                // Broadcast updated state to all players
+                broadcast_game_state(client, game_state, None).await?
             } else {
-                println!("Player {} can't move - position is occupied", player_id);
+                // Movement failed (collision with another player or obstacle)
+                let error_msg = ServerMessage::Error { 
+                    message: "Cannot move to that position - there's an obstacle or another player there".to_string() 
+                };
+                let message = serde_json::to_string(&error_msg)?;
+                client.send_reply(sender_tag.clone(), message).await?
             }
         }
     }
