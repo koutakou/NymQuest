@@ -3,12 +3,13 @@ mod game_state;
 mod network;
 mod renderer;
 
-use std::io::{self, Write};
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::task;
-use tokio::time::{self, Duration};
 use colored::*;
+use rustyline::error::ReadlineError;
+use rustyline::Editor;
+use std::path::PathBuf;
 
 use game_protocol::{ClientMessage, ServerMessage, Direction};
 use game_state::GameState;
@@ -18,7 +19,7 @@ use renderer::render_game_state;
 /// Main entry point for the NYM MMORPG Client
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("=== NYM MMORPG Client ===");
+    println!("{}", "=== NYM MMORPG Client ===".green().bold());
     
     // Initialize the game state
     let game_state: Arc<Mutex<GameState>> = Arc::new(Mutex::new(GameState::new()));
@@ -27,37 +28,99 @@ async fn main() -> anyhow::Result<()> {
     let mut network = match NetworkManager::new().await {
         Ok(network) => network,
         Err(e) => {
-            println!("Error: {}", e);
+            println!("{} {}", "Error:".red().bold(), e);
             return Ok(());
         }
     };
     
     // Create a channel for user input commands
     let (tx, mut rx) = mpsc::channel::<String>(100);
-    let tx_clone = tx.clone();
     
     // Create a dedicated channel for controlling typing state
     let (typing_tx, mut typing_rx) = mpsc::channel::<bool>(10);
+    let typing_tx_clone = typing_tx.clone();
     
-    // Spawn a task to handle user input
+    // Initialize rustyline editor with history
+    let history_path = dirs_next::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".nym_mmorpg_history");
+        
+    println!("{} {}", "Command history saved to:".cyan(), history_path.display());
+    
+    // Clone necessary values for the input handling task
+    let tx_clone = tx.clone();
+    let game_state_clone = Arc::clone(&game_state);
+    
+    // Spawn a task to handle user input with command history
     task::spawn(async move {
+        // Initialize rustyline editor
+        let mut rl = match Editor::<()>::new() {
+            Ok(editor) => editor,
+            Err(e) => {
+                println!("Error initializing editor: {}", e);
+                return;
+            }
+        };
+        
+        // Load command history if it exists
+        if let Err(e) = rl.load_history(&history_path) {
+            // Only print a warning if the file exists but couldn't be loaded
+            // It's normal for it not to exist on the first run
+            if history_path.exists() {
+                println!("Warning: Failed to load command history: {}", e);
+            }
+        }
+        
+        // Input handling loop
         loop {
             // Signal that typing has started
-            let _ = typing_tx.send(true).await;
+            let _ = typing_tx_clone.send(true).await;
             
-            let mut input = String::new();
-            io::stdin().read_line(&mut input).unwrap();
-            let input = input.trim().to_string();
+            // Show game state when prompt appears
+            render_game_state(&game_state_clone.lock().unwrap());
+            
+            // Use rustyline to get input with history navigation
+            let readline = rl.readline("> ");
             
             // Signal that typing has ended
-            let _ = typing_tx.send(false).await;
+            let _ = typing_tx_clone.send(false).await;
             
-            if input.is_empty() {
-                continue;
-            }
-            
-            if let Err(_) = tx_clone.send(input).await {
-                break;
+            match readline {
+                Ok(line) => {
+                    let input = line.trim().to_string();
+                    
+                    if input.is_empty() {
+                        continue;
+                    }
+                    
+                    // Add valid input to history
+                    rl.add_history_entry(input.clone());
+                    
+                    // Save history periodically
+                    if let Err(e) = rl.save_history(&history_path) {
+                        println!("Warning: Failed to save history: {}", e);
+                    }
+                    
+                    // Send the command to main thread
+                    if let Err(_) = tx_clone.send(input).await {
+                        break;
+                    }
+                },
+                Err(ReadlineError::Interrupted) => {
+                    // Ctrl-C pressed
+                    println!("CTRL-C pressed, use 'exit' to quit properly");
+                },
+                Err(ReadlineError::Eof) => {
+                    // Ctrl-D pressed, exit properly
+                    println!("EOF (CTRL-D) detected, exiting...");
+                    let exit_command = "exit".to_string();
+                    let _ = tx_clone.send(exit_command).await;
+                    break;
+                },
+                Err(err) => {
+                    println!("Error reading input: {}", err);
+                    break;
+                }
             }
         }
     });
@@ -65,39 +128,21 @@ async fn main() -> anyhow::Result<()> {
     // Render initial state
     render_game_state(&game_state.lock().unwrap());
     
-    // Main event loop
-    loop {
-        tokio::select! {
-            // Process user commands
-            Some(command) = rx.recv() => {
-                process_user_command(&mut network, &game_state, command).await?;
-                render_game_state(&game_state.lock().unwrap());
-            },
-            // Process incoming messages from the server
-            Some(server_message) = network.receive_message() => {
-                process_server_message(&game_state, server_message);
-            },
-            // Refresh the display periodically, but not during typing
-            _ = time::sleep(Duration::from_secs(2)) => {
-                // Only refresh if not typing
-                let state = game_state.lock().unwrap();
-                if !state.is_typing {
-                    render_game_state(&state);
-                }
-            },
-            // Check for typing state updates
-            Some(is_typing) = typing_rx.recv() => {
-                let mut state = game_state.lock().unwrap();
-                state.set_typing(is_typing);
-            }
+    // We'll use a simple event handler approach
+    let result = run_event_loop(&mut network, &game_state, &mut rx, &mut typing_rx).await;
+    
+    // This would only be reached if the event loop had a break condition
+    // which our implementation doesn't currently have
+    match result {
+        Ok(_) => {
+            println!("Disconnected. Goodbye!");
+            Ok(())
+        },
+        Err(e) => {
+            println!("{} {}", "Error in event loop:".red().bold(), e);
+            Err(e)
         }
     }
-    
-    // This code is unreachable due to the infinite loop above
-    // But we'll keep it as a reference for proper shutdown sequence
-    println!("Disconnected. Goodbye!");
-    
-    Ok(())
 }
 
 /// Process a command entered by the user
@@ -223,6 +268,41 @@ async fn process_user_command(
     Ok(())
 }
 
+/// Run the main event loop for the game
+async fn run_event_loop(
+    network: &mut NetworkManager,
+    game_state: &Arc<Mutex<GameState>>,
+    rx: &mut mpsc::Receiver<String>,
+    typing_rx: &mut mpsc::Receiver<bool>
+) -> anyhow::Result<()> {
+    // This loop will run until the process exits
+    loop {
+        tokio::select! {
+            // Process user commands
+            Some(command) = rx.recv() => {
+                if let Err(e) = process_user_command(network, game_state, command).await {
+                    println!("{} {}", "Error processing command:".red().bold(), e);
+                }
+                // Don't render here as it's done in the input handler now
+            },
+            // Process incoming messages from the server
+            Some(server_message) = network.receive_message() => {
+                process_server_message(game_state, server_message);
+                // Only refresh if not typing
+                let state = game_state.lock().unwrap();
+                if !state.is_typing {
+                    render_game_state(&state);
+                }
+            },
+            // Check for typing state updates
+            Some(is_typing) = typing_rx.recv() => {
+                let mut state = game_state.lock().unwrap();
+                state.set_typing(is_typing);
+            }
+        }
+    }
+}
+
 /// Process a message received from the server
 fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: ServerMessage) {
     let mut state = game_state.lock().unwrap();
@@ -230,7 +310,7 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
     match server_message {
         ServerMessage::RegisterAck { player_id } => {
             state.set_player_id(player_id);
-            println!("Registration successful!");
+            println!("{}", "Registration successful!".green().bold());
             render_game_state(&state);
         },
         ServerMessage::GameState { players } => {
