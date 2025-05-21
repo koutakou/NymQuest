@@ -5,7 +5,7 @@ mod renderer;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
-use tokio::task;
+use tokio::{task, time};
 use colored::*;
 use rustyline::error::ReadlineError;
 use rustyline::Editor;
@@ -159,47 +159,55 @@ async fn process_user_command(
     
     match command_parts[0] {
         "register" => {
-            if !game_state.lock().unwrap().is_registered() {
-                if command_parts.len() < 2 {
-                    println!("Usage: register <name>");
-                    return Ok(());
-                }
-                
-                let name = command_parts[1..].join(" ");
-                let register_msg = ClientMessage::Register { name };
-                
-                network.send_message(register_msg).await?;
-                println!("Registration request sent...");
-            } else {
-                println!("You are already registered!");
+            if command_parts.len() < 2 {
+                println!("{}", "Please provide a name to register with".yellow());
+                return Ok(());
             }
+            
+            let name = command_parts[1..].join(" ").trim().to_string();
+            
+            // Create register message (sequence number handled by NetworkManager)
+            let register_msg = ClientMessage::Register { 
+                name, 
+                seq_num: 0 // Placeholder, will be replaced by NetworkManager
+            };
+            
+            // Send the message
+            network.send_message(register_msg).await?;
+            
+            println!("{}", "Registration request sent...".green());
         },
         "move" => {
             // Check if player is registered
-            if !game_state.lock().unwrap().is_registered() {
-                println!("You need to register first before you can move.");
+            let player_id = {
+                let state = game_state.lock().unwrap();
+                state.get_player_id().map(|id| id.to_string())
+            };
+            
+            if player_id.is_none() {
+                println!("{}", "You need to register first!".red());
                 return Ok(());
             }
             
             if command_parts.len() < 2 {
-                println!("Usage: move <direction> (up, down, left, right, ul, ur, dl, dr)");
+                println!("{}", "Please specify a direction (up, down, left, right, etc.)".yellow());
                 return Ok(());
             }
             
-            // Parse direction using the improved from_str method
-            let direction = match Direction::from_str(command_parts[1]) {
-                Some(dir) => dir,
-                None => {
-                    println!("Invalid direction. Valid options:\n\
-                      - Cardinal: up/u, down/d, left/l, right/r\n\
-                      - Diagonal: upleft/ul, upright/ur, downleft/dl, downright/dr\n\
-                      - Compass: north/n, south/s, east/e, west/w, northwest/nw, northeast/ne, southwest/sw, southeast/se");
-                    return Ok(());
-                }
-            };
+            let direction_str = &command_parts[1].to_lowercase();
             
-            // Get current position to display movement prediction
-            let move_vector = direction.to_vector();
+            if let Some(direction) = Direction::from_str(direction_str) {
+                // Create move message with placeholder sequence number
+                let move_msg = ClientMessage::Move {
+                    direction,
+                    seq_num: 0  // Will be set by NetworkManager
+                };
+                
+                // Send the message
+                network.send_message(move_msg).await?;
+                
+                // Get current position to display movement prediction
+                let move_vector = direction.to_vector();
             
             // Create a block to limit the scope of the mutex lock
             {
@@ -229,10 +237,10 @@ async fn process_user_command(
                 }
             }
             
-            // Create and send move message
-            let move_msg = ClientMessage::Move { direction };
-            network.send_message(move_msg).await?;
-            println!("Move request sent...");
+            // Message already sent above, no need to send it again
+            } else {
+                println!("{}", "Invalid direction! Valid options: up, down, left, right, upleft, upright, downleft, downright".red());
+            }
         },
         "attack" => {
             // Check if player is registered
@@ -247,7 +255,10 @@ async fn process_user_command(
             }
             
             let target_id = command_parts[1].to_string();
-            let attack_msg = ClientMessage::Attack { target_id };
+            let attack_msg = ClientMessage::Attack { 
+                target_id,
+                seq_num: 0  // Will be set by NetworkManager
+            };
             
             network.send_message(attack_msg).await?;
             println!("Attack request sent...");
@@ -265,7 +276,10 @@ async fn process_user_command(
             }
             
             let message_text = command_parts[1..].join(" ");
-            let chat_msg = ClientMessage::Chat { message: message_text };
+            let chat_msg = ClientMessage::Chat { 
+                message: message_text,
+                seq_num: 0  // Will be set by NetworkManager
+            };
             
             network.send_message(chat_msg).await?;
             println!("Chat message sent...");
@@ -273,7 +287,7 @@ async fn process_user_command(
         "exit" => {
             // Send disconnect message if registered
             if game_state.lock().unwrap().is_registered() {
-                let disconnect_msg = ClientMessage::Disconnect;
+                let disconnect_msg = ClientMessage::Disconnect { seq_num: 0 };
                 if let Err(e) = network.send_message(disconnect_msg).await {
                     println!("Failed to send disconnect message: {}", e);
                 } else {
@@ -304,6 +318,9 @@ async fn run_event_loop(
     rx: &mut mpsc::Receiver<String>,
     typing_rx: &mut mpsc::Receiver<bool>
 ) -> anyhow::Result<()> {
+    // Create an interval for checking unacknowledged messages
+    let mut check_interval = time::interval(time::Duration::from_millis(1000));
+    
     // This loop will run until the process exits
     loop {
         tokio::select! {
@@ -329,6 +346,12 @@ async fn run_event_loop(
             Some(is_typing) = typing_rx.recv() => {
                 let mut state = game_state.lock().unwrap();
                 state.set_typing(is_typing);
+            },
+            // Periodically check for messages that need to be resent
+            _ = check_interval.tick() => {
+                if let Err(e) = network.check_for_resends().await {
+                    println!("Error checking for messages to resend: {}", e);
+                }
             }
         }
     }
@@ -340,13 +363,13 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
     let mut state = game_state.lock().unwrap();
     
     let needs_refresh = match server_message.clone() {
-        ServerMessage::RegisterAck { player_id } => {
+        ServerMessage::RegisterAck { player_id, seq_num: _ } => {
             state.set_player_id(player_id);
             println!("{}", "Registration successful!".green().bold());
             render_game_state(&state);
             false
         },
-        ServerMessage::GameState { players } => {
+        ServerMessage::GameState { players, seq_num: _ } => {
             // Debugging output
             println!("{} {}", "Received game state with".cyan().bold(), 
                      format!("{} players", players.len()).yellow().bold());
@@ -362,13 +385,13 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
             render_game_state(&state);
             false
         },
-        ServerMessage::Event { message } => {
+        ServerMessage::Event { message, seq_num: _ } => {
             // Add events to chat history as system messages
             state.add_chat_message("System".to_string(), message.clone());
             println!("{} {}", "Event:".yellow().bold(), message.yellow());
             true
         },
-        ServerMessage::ChatMessage { sender_name, message } => {
+        ServerMessage::ChatMessage { sender_name, message, seq_num: _ } => {
             // Add message to chat history
             state.add_chat_message(sender_name.clone(), message.clone());
             
@@ -376,11 +399,16 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
             println!("[{}]: {}", sender_name.green(), message.white());
             true
         },
-        ServerMessage::Error { message } => {
+        ServerMessage::Error { message, seq_num: _ } => {
             // Add errors to chat history as system messages
             state.add_chat_message("System Error".to_string(), message.clone());
             println!("{} {}", "Error:".red().bold(), message.red());
             true
+        },
+        ServerMessage::Ack { client_seq_num: _, original_type: _ } => {
+            // Acknowledgments are handled in the NetworkManager
+            // We don't need to do anything here
+            false
         }
     };
     

@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::time::Duration;
 
 // Player's position in the game world
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
@@ -42,37 +43,118 @@ pub struct Player {
     pub last_attack_time: u64,
 }
 
+// Type of client message (used for acknowledgements)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum ClientMessageType {
+    Register,
+    Move,
+    Attack,
+    Chat,
+    Disconnect,
+    Ack,
+}
+
 // Message types that the client can send to the server
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ClientMessage {
     // Message to register in the game
-    Register { name: String },
+    Register { name: String, seq_num: u64 },
     // Message to move in the game world
-    Move { direction: Direction },
+    Move { direction: Direction, seq_num: u64 },
     // Message to attack another player
-    Attack { target_id: String },
+    Attack { target_id: String, seq_num: u64 },
     // Message to send chat to all players
-    Chat { message: String },
+    Chat { message: String, seq_num: u64 },
     // Message to leave the game
-    Disconnect,
+    Disconnect { seq_num: u64 },
+    // Acknowledge receipt of a server message
+    Ack { server_seq_num: u64, original_type: ServerMessageType },
+}
+
+// Type of server message (used for acknowledgements)
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum ServerMessageType {
+    RegisterAck,
+    GameState,
+    Event,
+    ChatMessage,
+    Error,
+    Ack,
 }
 
 // Message types that the server can send to the client
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     // Confirms registration and provides the player ID
-    RegisterAck { player_id: String },
+    RegisterAck { player_id: String, seq_num: u64 },
     // Game state update
     GameState { 
         players: HashMap<String, Player>,
+        seq_num: u64,
         // We could add other game elements here
     },
     // Event notification (attack, etc.)
-    Event { message: String },
+    Event { message: String, seq_num: u64 },
     // Chat message from another player
-    ChatMessage { sender_name: String, message: String },
+    ChatMessage { sender_name: String, message: String, seq_num: u64 },
     // Error message
-    Error { message: String },
+    Error { message: String, seq_num: u64 },
+    // Acknowledge receipt of a client message
+    Ack { client_seq_num: u64, original_type: ClientMessageType },
+}
+
+// Helper implementation for ServerMessage to get metadata easily
+impl ServerMessage {
+    // Get the message type
+    pub fn get_type(&self) -> ServerMessageType {
+        match self {
+            ServerMessage::RegisterAck { .. } => ServerMessageType::RegisterAck,
+            ServerMessage::GameState { .. } => ServerMessageType::GameState,
+            ServerMessage::Event { .. } => ServerMessageType::Event,
+            ServerMessage::ChatMessage { .. } => ServerMessageType::ChatMessage,
+            ServerMessage::Error { .. } => ServerMessageType::Error,
+            ServerMessage::Ack { .. } => ServerMessageType::Ack,
+        }
+    }
+    
+    // Get the sequence number
+    pub fn get_seq_num(&self) -> u64 {
+        match self {
+            ServerMessage::RegisterAck { seq_num, .. } => *seq_num,
+            ServerMessage::GameState { seq_num, .. } => *seq_num,
+            ServerMessage::Event { seq_num, .. } => *seq_num,
+            ServerMessage::ChatMessage { seq_num, .. } => *seq_num,
+            ServerMessage::Error { seq_num, .. } => *seq_num,
+            ServerMessage::Ack { client_seq_num, .. } => *client_seq_num,
+        }
+    }
+}
+
+// Helper implementation for ClientMessage to get metadata easily
+impl ClientMessage {
+    // Get the message type
+    pub fn get_type(&self) -> ClientMessageType {
+        match self {
+            ClientMessage::Register { .. } => ClientMessageType::Register,
+            ClientMessage::Move { .. } => ClientMessageType::Move,
+            ClientMessage::Attack { .. } => ClientMessageType::Attack,
+            ClientMessage::Chat { .. } => ClientMessageType::Chat,
+            ClientMessage::Disconnect { .. } => ClientMessageType::Disconnect,
+            ClientMessage::Ack { .. } => ClientMessageType::Ack,
+        }
+    }
+    
+    // Get the sequence number
+    pub fn get_seq_num(&self) -> u64 {
+        match self {
+            ClientMessage::Register { seq_num, .. } => *seq_num,
+            ClientMessage::Move { seq_num, .. } => *seq_num,
+            ClientMessage::Attack { seq_num, .. } => *seq_num,
+            ClientMessage::Chat { seq_num, .. } => *seq_num,
+            ClientMessage::Disconnect { seq_num, .. } => *seq_num,
+            ClientMessage::Ack { server_seq_num, .. } => *server_seq_num,
+        }
+    }
 }
 
 // Movement direction

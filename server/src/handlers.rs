@@ -1,10 +1,91 @@
 use anyhow::Result;
 use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::collections::{HashMap, HashSet};
 
-use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position};
+use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType};
 use crate::game_state::GameState;
+
+// Helper function to convert Direction to a human-readable string
+fn print_direction(direction: &Direction) -> &'static str {
+    match direction {
+        Direction::Up => "up",
+        Direction::Down => "down",
+        Direction::Left => "left",
+        Direction::Right => "right",
+        Direction::UpLeft => "up-left",
+        Direction::UpRight => "up-right",
+        Direction::DownLeft => "down-left",
+        Direction::DownRight => "down-right",
+    }
+}
+
+// Global sequence number for server messages
+static mut SERVER_SEQ_NUM: u64 = 1;
+
+// Thread-safe function to get the next server sequence number
+fn next_seq_num() -> u64 {
+    unsafe {
+        let num = SERVER_SEQ_NUM;
+        SERVER_SEQ_NUM += 1;
+        num
+    }
+}
+
+// Tracking received client messages to prevent replays
+lazy_static::lazy_static! {
+    static ref RECEIVED_CLIENT_MSGS: Mutex<HashMap<String, HashSet<u64>>> = Mutex::new(HashMap::new());
+}
+
+// Check if we've seen this message before (replay protection)
+fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
+    let tag_str = tag.to_string();
+    let mut received = RECEIVED_CLIENT_MSGS.lock().unwrap();
+    
+    // Get or create the set for this client
+    let client_msgs = received.entry(tag_str).or_insert_with(HashSet::new);
+    
+    // Check if we've seen this sequence number
+    if client_msgs.contains(&seq_num) {
+        true
+    } else {
+        // Record this sequence number
+        client_msgs.insert(seq_num);
+        
+        // Prune old sequence numbers to avoid unbounded growth
+        if client_msgs.len() > 1000 {
+            // Keep only the 500 highest sequence numbers
+            let mut seqs: Vec<_> = client_msgs.iter().cloned().collect();
+            seqs.sort_unstable_by(|a, b| b.cmp(a)); // Descending order
+            seqs.truncate(500);
+            
+            // Create a new set with just these sequence numbers
+            *client_msgs = seqs.into_iter().collect();
+        }
+        
+        false
+    }
+}
+
+/// Send an acknowledgment for a client message
+async fn send_ack(
+    client: &MixnetClient,
+    sender_tag: &AnonymousSenderTag,
+    client_message: &ClientMessage
+) -> Result<()> {
+    // Create acknowledgment
+    let ack = ServerMessage::Ack {
+        client_seq_num: client_message.get_seq_num(),
+        original_type: client_message.get_type(),
+    };
+    
+    // Serialize and send
+    let message = serde_json::to_string(&ack)?;
+    client.send_reply(sender_tag.clone(), message).await?;
+    
+    Ok(())
+}
 
 /// Broadcast game state to all active players
 pub async fn broadcast_game_state(
@@ -14,7 +95,13 @@ pub async fn broadcast_game_state(
 ) -> Result<()> {
     // Get the current game state
     let players = game_state.get_players();
-    let game_state_msg = ServerMessage::GameState { players };
+    
+    // Create game state message with sequence number
+    let game_state_msg = ServerMessage::GameState { 
+        players,
+        seq_num: next_seq_num(),
+    };
+    
     let message = serde_json::to_string(&game_state_msg)?;
     
     // Get a copy of all active connections
@@ -56,21 +143,45 @@ pub async fn handle_client_message(
     message: ClientMessage,
     sender_tag: AnonymousSenderTag
 ) -> Result<()> {
+    // Get sequence number for replay protection and acknowledgments
+    let seq_num = message.get_seq_num();
+    
+    // Handle acknowledgments separately and directly
+    if let ClientMessage::Ack { .. } = &message {
+        // We don't need to do anything with acks in this simple implementation
+        // In a more complex system, we might track which messages were acknowledged
+        return Ok(());
+    }
+    
+    // Check for message replay, but only for non-ack messages
+    if is_message_replay(&sender_tag, seq_num) {
+        println!("Detected replay attack or duplicate message: seq {} from {:?}", seq_num, sender_tag);
+        return Ok(());
+    }
+    
+    // Send acknowledgment first for all non-ack messages
+    send_ack(client, &sender_tag, &message).await?;
+    
+    // Process the message based on its type
     match message {
-        ClientMessage::Register { name } => {
+        ClientMessage::Register { name, .. } => {
             handle_register(client, game_state, name, sender_tag).await
         },
-        ClientMessage::Move { direction } => {
+        ClientMessage::Move { direction, .. } => {
             handle_move(client, game_state, direction, sender_tag).await
         },
-        ClientMessage::Attack { target_id } => {
+        ClientMessage::Attack { target_id, .. } => {
             handle_attack(client, game_state, target_id, sender_tag).await
         },
-        ClientMessage::Chat { message } => {
+        ClientMessage::Chat { message, .. } => {
             handle_chat(client, game_state, message, sender_tag).await
         },
-        ClientMessage::Disconnect => {
+        ClientMessage::Disconnect { .. } => {
             handle_disconnect(client, game_state, sender_tag).await
+        },
+        ClientMessage::Ack { .. } => {
+            // Already handled above
+            Ok(())
         },
     }
 }
@@ -85,8 +196,12 @@ async fn handle_register(
     // Add the player to the game state
     let player_id = game_state.add_player(name, sender_tag.clone());
     
-    // Send registration confirmation
-    let register_ack = ServerMessage::RegisterAck { player_id: player_id.clone() };
+    // Send registration confirmation with sequence number
+    let register_ack = ServerMessage::RegisterAck { 
+        player_id: player_id.clone(), 
+        seq_num: next_seq_num(),
+    };
+    
     let message = serde_json::to_string(&register_ack)?;
     client.send_reply(sender_tag.clone(), message).await?;
     
@@ -130,7 +245,8 @@ async fn handle_move(
                 // Movement was successful
                 // Provide immediate feedback to the player who moved
                 let move_confirm = ServerMessage::Event { 
-                    message: format!("Moved {:?} to position ({:.1}, {:.1})", direction, new_position.x, new_position.y) 
+                    message: format!("Moved {:?} to position ({:.1}, {:.1})", direction, new_position.x, new_position.y),
+                    seq_num: next_seq_num()
                 };
                 let confirm_msg = serde_json::to_string(&move_confirm)?;
                 client.send_reply(sender_tag.clone(), confirm_msg).await?;
@@ -140,11 +256,20 @@ async fn handle_move(
             } else {
                 // Movement failed (collision with another player or obstacle)
                 let error_msg = ServerMessage::Error { 
-                    message: "Cannot move to that position - there's an obstacle or another player there".to_string() 
+                    message: "Cannot move to that position - there's an obstacle or another player there".to_string(),
+                    seq_num: next_seq_num()
                 };
                 let message = serde_json::to_string(&error_msg)?;
-                client.send_reply(sender_tag.clone(), message).await?
+                client.send_reply(sender_tag.clone(), message).await?;
             }
+        } else {
+            // Player not found
+            let error_msg = ServerMessage::Error { 
+                message: "You need to register before moving".to_string(),
+                seq_num: next_seq_num(),
+            };
+            let message = serde_json::to_string(&error_msg)?;
+            client.send_reply(sender_tag.clone(), message).await?;
         }
     }
     
@@ -177,7 +302,8 @@ async fn handle_attack(
                     .map_or(0, |p| p.last_attack_time));
             
             let cooldown_msg = ServerMessage::Error { 
-                message: format!("Attack on cooldown! Wait {} more seconds.", remaining) 
+                message: format!("Attack on cooldown! Wait {} more seconds.", remaining),
+                seq_num: next_seq_num(),
             };
             let message = serde_json::to_string(&cooldown_msg)?;
             client.send_reply(sender_tag.clone(), message).await?;
@@ -194,11 +320,14 @@ async fn handle_attack(
         if target_defeated {
             // Send an event to the attacker
             let event = ServerMessage::Event { 
-                message: format!("Player {} has been defeated!", target_id) 
+                message: format!("Player {} has been defeated!", target_id),
+                seq_num: next_seq_num(),
             };
             let message = serde_json::to_string(&event)?;
             client.send_reply(sender_tag.clone(), message).await?;
         }
+        
+        // This event is now sent in the move handler itself, we don't need to send it again here
         
         // Broadcast the updated game state to all players
         broadcast_game_state(client, game_state, None).await?;
@@ -224,12 +353,14 @@ async fn handle_chat(
             let chat_msg = ServerMessage::ChatMessage {
                 sender_name: sender_name.clone(),
                 message: message.clone(),
+                seq_num: next_seq_num(),
             };
             let serialized = serde_json::to_string(&chat_msg)?;
             
             // Create confirmation message for the sender
             let confirm_msg = ServerMessage::Event {
                 message: format!("Your message has been sent: {}", message),
+                seq_num: next_seq_num(),
             };
             let confirm_serialized = serde_json::to_string(&confirm_msg)?;
             

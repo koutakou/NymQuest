@@ -15,6 +15,10 @@ use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 
+// For thread-safe handling of received message tracking
+#[macro_use]
+extern crate lazy_static;
+
 #[tokio::main]
 async fn main() -> Result<()> {
     println!("=== Nym Quest Server ===");

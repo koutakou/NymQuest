@@ -50,6 +50,11 @@ impl GameState {
         self.player_id = Some(id);
         self.update_timestamp();
     }
+    
+    /// Get the player ID if registered
+    pub fn get_player_id(&self) -> Option<&String> {
+        self.player_id.as_ref()
+    }
 
     /// Update the game state with new player data
     pub fn update_players(&mut self, players: HashMap<String, Player>) {
