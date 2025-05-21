@@ -20,8 +20,11 @@ pub async fn broadcast_game_state(
     // Get a copy of all active connections
     let connections = game_state.get_connections();
     
+    // Keep track of players we failed to send messages to
+    let mut failed_tags = Vec::new();
+    
     // Send state update to each connected player
-    for (_, tag) in connections {
+    for (player_id, tag) in connections {
         // Skip excluded player if any
         if let Some(exclude) = &exclude_tag {
             if exclude.to_string() == tag.to_string() {
@@ -29,8 +32,18 @@ pub async fn broadcast_game_state(
             }
         }
         
-        // Send the update to this player
-        let _ = client.send_reply(tag, message.clone()).await;
+        // Send the update to this player and track failures
+        if let Err(e) = client.send_reply(tag.clone(), message.clone()).await {
+            println!("Failed to send game state to player {}: {}", player_id, e);
+            failed_tags.push(tag);
+        }
+    }
+    
+    // Clean up any players that we couldn't reach
+    for tag in failed_tags {
+        if let Some(player_id) = game_state.remove_player(&tag) {
+            println!("Removed unreachable player: {}", player_id);
+        }
     }
     
     Ok(())
