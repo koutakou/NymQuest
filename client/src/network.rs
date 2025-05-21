@@ -67,33 +67,39 @@ impl NetworkManager {
     
     /// Wait for the next message from the server
     pub async fn receive_message(&mut self) -> Option<ServerMessage> {
-        if let Some(client) = &mut self.client {
-            // Using the built-in next() method of MixnetClient
-            if let Some(received_message) = client.next().await {
-                if received_message.message.is_empty() {
-                    return None;
-                }
-                
-                match String::from_utf8(received_message.message.clone()) {
-                    Ok(message_str) => {
-                        match serde_json::from_str::<ServerMessage>(&message_str) {
-                            Ok(server_message) => Some(server_message),
-                            Err(e) => {
-                                println!("Error deserializing server message: {}", e);
-                                None
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        println!("Error parsing message: {}", e);
-                        None
-                    }
-                }
-            } else {
+        // Early return if client is not connected
+        let client = match &mut self.client {
+            Some(client) => client,
+            None => return None,
+        };
+        
+        // Wait for the next message
+        let received_message = match client.next().await {
+            Some(msg) => msg,
+            None => return None,
+        };
+        
+        // Check for empty messages
+        if received_message.message.is_empty() {
+            return None;
+        }
+        
+        // Try to convert bytes to UTF-8 string
+        let message_str = match String::from_utf8(received_message.message) {
+            Ok(str) => str,
+            Err(e) => {
+                println!("Error parsing message: {}", e);
+                return None;
+            }
+        };
+        
+        // Try to deserialize the message
+        match serde_json::from_str::<ServerMessage>(&message_str) {
+            Ok(server_message) => Some(server_message),
+            Err(e) => {
+                println!("Error deserializing server message: {}", e);
                 None
             }
-        } else {
-            None
         }
     }
     
