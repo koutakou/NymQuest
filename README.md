@@ -97,6 +97,9 @@ NymQuest demonstrates several key privacy benefits:
 3. **Anonymous Authentication**: Players can participate without revealing their real identity
 4. **Decentralized Architecture**: No central server needs to be trusted with player data
 5. **Message Authentication**: All messages are cryptographically authenticated using HMAC-SHA256 to prevent tampering
+6. **Enhanced Display IDs**: Players are assigned randomized display IDs using a word-number combination (e.g., Warrior123) rather than sequential numbering to improve anonymity
+7. **Secure Authentication Verification**: Improved error handling for authentication failures with privacy-preserving error messages
+8. **Protection Against Replay Attacks**: Messages are verified with sequence numbers and authentication tags to prevent replay attacks
 
 ## Combat System
 

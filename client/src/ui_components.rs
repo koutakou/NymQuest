@@ -134,7 +134,7 @@ pub fn format_health(health: u32, max_width: usize) -> String {
         format!("{}{}", bar_fill.red(), bar_empty)
     };
     
-    format!("{} {} [{}]", health_colored, bar_colored, health)
+    format!("{} {}", health_colored, bar_colored)
 }
 
 /// Format a chat message with timestamp and sender highlighting
@@ -256,14 +256,22 @@ pub fn render_mini_map(state: &GameState, current_position: Option<&Position>) {
     // Place coordinate markers
     for i in 1..MAP_SIZE-1 {
         if i % 5 == 0 {
+            // Calculate the actual world coordinates at this grid position
             let x_coord = WORLD_MIN_X + (WORLD_MAX_X - WORLD_MIN_X) * (i as f32 / (MAP_SIZE as f32 - 2.0));
             let y_coord = WORLD_MIN_Y + (WORLD_MAX_Y - WORLD_MIN_Y) * (i as f32 / (MAP_SIZE as f32 - 2.0));
+            
+            // Format for display in single-digit format to save space
+            let x_label = format!("{:.0}", x_coord);
+            let y_label = format!("{:.0}", y_coord);
             
             // X-axis markers (on bottom)
             map[MAP_SIZE-1][i] = '+';
             
             // Y-axis markers (on left)
             map[i][0] = '+';
+            
+            // Mark the grid with '+' symbols only, without displaying coordinate numbers on the map itself
+            // This makes the map cleaner while still showing the grid points
         }
     }
     

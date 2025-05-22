@@ -44,17 +44,41 @@ impl GameState {
             .unwrap_or_default()
             .as_secs();
         
-        // Generate a privacy-preserving display ID
-        // This will be a simple format like "Player1", "Player2", etc.
+        // Generate a privacy-preserving display ID using a more anonymous scheme
+        // Use a random alphanumeric code to improve privacy protection
         let display_id = {
+            let mut rng = thread_rng();
+            // Generate a random prefix from a set of common words
+            let prefixes = ["Hero", "Warrior", "Knight", "Scout", "Ranger", "Mage", "Nomad", "Shadow"];
+            let prefix = prefixes[rng.gen_range(0..prefixes.len())];
+            
+            // Add a 3-digit random number
+            let suffix = rng.gen_range(100..999);
+            
+            format!("{}{}", prefix, suffix)
+        };
+        
+        // Ensure the display ID is unique
+        let unique_display_id = {
             let mut state = self.players.lock().unwrap();
-            format!("Player{}", state.len() + 1)
+            let mut current_id = display_id;
+            let mut attempts = 0;
+            
+            // Check if this display ID is already in use
+            while state.values().any(|p| p.display_id == current_id) && attempts < 10 {
+                // If so, add a random number to the end
+                let suffix = thread_rng().gen_range(100..999);
+                current_id = format!("{}{}", current_id, suffix);
+                attempts += 1;
+            }
+            
+            current_id
         };
             
         // Create a new player with the available position
         let player = Player {
             id: player_id.clone(),
-            display_id,
+            display_id: unique_display_id,
             name,
             position: available_position,
             health: 100,
