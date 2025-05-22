@@ -186,6 +186,12 @@ async fn process_user_command(
     match cmd {
         // Registration command
         "register" | "r" => {
+            // Check if the player is already registered
+            if game_state.lock().unwrap().is_registered() {
+                println!("{}", "You are already registered. Please disconnect first before registering again.".yellow());
+                return Ok(());
+            }
+            
             if command_parts.len() < 2 {
                 println!("{}", "Please provide a name to register with".yellow());
                 return Ok(());

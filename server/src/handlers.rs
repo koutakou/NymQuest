@@ -259,6 +259,25 @@ async fn handle_register(
     sender_tag: AnonymousSenderTag,
     auth_key: &AuthKey
 ) -> Result<()> {
+    // Check if this sender_tag is already associated with a registered player
+    if let Some(existing_player_id) = game_state.get_player_id(&sender_tag) {
+        // Client is already registered, send an error message
+        let error_msg = ServerMessage::Error { 
+            message: "You are already registered. Please disconnect first before registering again.".to_string(),
+            seq_num: next_seq_num(),
+        };
+        
+        // Create an authenticated message
+        let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+        let error_json = serde_json::to_string(&authenticated_error)?;
+        
+        // Send the error message to the client
+        client.send_reply(sender_tag.clone(), error_json).await?;
+        
+        println!("Registration attempt rejected: Client already registered as {}", existing_player_id);
+        return Ok(());
+    }
+    
     // Add the player to the game state
     let player_id = game_state.add_player(name, sender_tag.clone());
     

@@ -104,6 +104,7 @@ NymQuest demonstrates several key privacy benefits:
 6. **Enhanced Display IDs**: Players are assigned randomized display IDs using a word-number combination (e.g., Warrior123) rather than sequential numbering to improve anonymity
 7. **Secure Authentication Verification**: Improved error handling for authentication failures with privacy-preserving error messages
 8. **Protection Against Replay Attacks**: Messages are verified with sequence numbers and authentication tags to prevent replay attacks
+9. **Session Integrity Protection**: Prevents identity conflicts by requiring clients to disconnect before registering again, maintaining the integrity of user sessions
 
 ## Combat System
 
