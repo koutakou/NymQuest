@@ -83,10 +83,14 @@ The project consists of two main components:
    ```
 
 4. Use the following commands in the client:
-   - Move: `/move up`, `/move down`, `/move left`, `/move right`
-   - Chat: `/chat Hello everyone!`
-   - Attack: `/attack player_display_id` (use the ID in [brackets], not the player name)
-   - Disconnect: `/quit`
+   - Register: `/register YourName` or `/r YourName`
+   - Move: `/move up` (or `/m up`, `/go up`), `/move down`, `/move left`, `/move right`
+   - Direct movement: `/up` (or `/u`, `/n`), `/down` (or `/d`, `/s`), `/left` (or `/l`, `/w`), `/right` (or `/r`, `/e`)
+   - Diagonal movement: `/ne`, `/nw`, `/se`, `/sw`
+   - Chat: `/chat Hello everyone!` or `/c Hello everyone!` or `/say Hello everyone!`
+   - Attack: `/attack player_display_id` or `/a player_display_id` (use the ID in [brackets], not the player name)
+   - Help: `/help` or `/h` or `/?`
+   - Disconnect: `/quit` or `/exit` or `/q`
 
 ## Privacy Benefits
 

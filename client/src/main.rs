@@ -4,14 +4,18 @@ mod network;
 mod renderer;
 mod message_auth;
 mod ui_components;
+mod command_completer;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::{task, time};
 use colored::*;
 use rustyline::error::ReadlineError;
-use rustyline::Editor;
+use rustyline::{Editor, Config};
 use std::path::PathBuf;
+
+use command_completer::GameHistoryHinter;
+use ui_components::render_help_section;
 
 use game_protocol::{ClientMessage, ServerMessage, Direction, Position};
 use game_state::GameState;
@@ -56,9 +60,19 @@ async fn main() -> anyhow::Result<()> {
     
     // Spawn a task to handle user input with command history
     task::spawn(async move {
-        // Initialize rustyline editor
-        let mut rl = match Editor::<()>::new() {
-            Ok(editor) => editor,
+        // Initialize rustyline editor with custom config and hinter
+        let config = Config::builder()
+            .auto_add_history(true)
+            .history_ignore_space(true)
+            .completion_type(rustyline::CompletionType::List)
+            .build();
+            
+        let mut rl = match Editor::with_config(config) {
+            Ok(mut editor) => {
+                // Set our custom hinter
+                editor.set_helper(Some(GameHistoryHinter::new()));
+                editor
+            },
             Err(e) => {
                 println!("Error initializing editor: {}", e);
                 return;
@@ -166,8 +180,12 @@ async fn process_user_command(
         return Ok(());
     }
     
-    match command_parts[0] {
-        "register" => {
+    // Get command without leading slash if present
+    let cmd = command_parts[0].trim_start_matches('/');
+    
+    match cmd {
+        // Registration command
+        "register" | "r" => {
             if command_parts.len() < 2 {
                 println!("{}", "Please provide a name to register with".yellow());
                 return Ok(());
@@ -186,7 +204,8 @@ async fn process_user_command(
             
             println!("{}", "Registration request sent...".green());
         },
-        "move" => {
+        // Movement commands
+        "move" | "m" | "go" => {
             // Check if player is registered
             let player_id = {
                 let state = game_state.lock().unwrap();
@@ -251,7 +270,35 @@ async fn process_user_command(
                 println!("{}", "Invalid direction! Valid options: up, down, left, right, upleft, upright, downleft, downright".red());
             }
         },
-        "attack" => {
+        // Direct movement shortcuts - these are more ergonomic than typing "/move <direction>"
+        "up" | "u" | "north" | "n" => {
+            // Use helper function to handle movement in direction
+            handle_movement_direction(network, game_state, Direction::Up).await?
+        },
+        "down" | "d" | "south" | "s" => {
+            handle_movement_direction(network, game_state, Direction::Down).await?
+        },
+        "left" | "l" | "west" | "w" => {
+            handle_movement_direction(network, game_state, Direction::Left).await?
+        },
+        "right" | "r" | "east" | "e" => {
+            handle_movement_direction(network, game_state, Direction::Right).await?
+        },
+        // Diagonal movement shortcuts
+        "ne" | "northeast" => {
+            handle_movement_direction(network, game_state, Direction::UpRight).await?
+        },
+        "nw" | "northwest" => {
+            handle_movement_direction(network, game_state, Direction::UpLeft).await?
+        },
+        "se" | "southeast" => {
+            handle_movement_direction(network, game_state, Direction::DownRight).await?
+        },
+        "sw" | "southwest" => {
+            handle_movement_direction(network, game_state, Direction::DownLeft).await?
+        },
+        // Attack command
+        "attack" | "a" => {
             // Check if player is registered
             if !game_state.lock().unwrap().is_registered() {
                 println!("You need to register first before you can attack.");
@@ -272,7 +319,8 @@ async fn process_user_command(
             network.send_message(attack_msg).await?;
             println!("Attack request sent to player '{}'...", target_display_id);
         },
-        "chat" => {
+        // Chat command
+        "chat" | "c" | "say" => {
             // Check if player is registered
             if !game_state.lock().unwrap().is_registered() {
                 println!("You need to register first before you can chat.");
@@ -293,7 +341,8 @@ async fn process_user_command(
             network.send_message(chat_msg).await?;
             println!("Chat message sent...");
         },
-        "exit" => {
+        // Exit commands
+        "exit" | "quit" | "q" => {
             // Send disconnect message if registered
             if game_state.lock().unwrap().is_registered() {
                 let disconnect_msg = ClientMessage::Disconnect { seq_num: 0 };
@@ -312,8 +361,16 @@ async fn process_user_command(
             println!("Goodbye!");
             std::process::exit(0);
         },
+        // Help command
+        "help" | "h" | "?" => {
+            if let Ok(state) = game_state.lock() {
+                render_help_section();
+            }
+            return Ok(());
+        },
         _ => {
             println!("Unknown command: {}", command_parts[0]);
+            println!("Type {} for available commands", "/help".cyan());
         }
     }
     
@@ -372,6 +429,67 @@ async fn run_event_loop(
             }
         }
     }
+}
+
+/// Helper function to handle movement in a specific direction
+/// This avoids recursion in async functions which would cause compile errors
+async fn handle_movement_direction(
+    network: &mut NetworkManager,
+    game_state: &Arc<Mutex<GameState>>,
+    direction: Direction
+) -> anyhow::Result<()> {
+    // Check if player is registered
+    let player_id = {
+        let state = game_state.lock().unwrap();
+        state.get_player_id().map(|id| id.to_string())
+    };
+    
+    if player_id.is_none() {
+        println!("{}", "You need to register first!".red());
+        return Ok(());
+    }
+    
+    // Create move message with placeholder sequence number
+    let move_msg = ClientMessage::Move {
+        direction,
+        seq_num: 0  // Will be set by NetworkManager
+    };
+    
+    // Send the message
+    network.send_message(move_msg).await?;
+    
+    // Get current position to display movement prediction
+    let move_vector = direction.to_vector();
+
+    // Create a block to limit the scope of the mutex lock
+    {
+        let mut state = game_state.lock().unwrap();
+        
+        // First, check if we have a player ID and clone it to avoid borrow issues
+        if let Some(player_id) = state.player_id.clone() {
+            // Now get a mutable reference to the player
+            if let Some(player) = state.players.get_mut(&player_id) {
+                // Calculate and display predicted new position
+                let mut predicted_pos = player.position;
+                
+                // Use the same mini_map_cell_size as the server (14.0 units)
+                // This ensures one movement command = one cell on the mini-map
+                let mini_map_cell_size = 14.0;
+                predicted_pos.apply_movement(move_vector, mini_map_cell_size);
+                
+                clear_screen();
+                println!("Moving {:?}", direction);
+                println!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
+                println!("Predicted position: ({:.1}, {:.1})", predicted_pos.x, predicted_pos.y);
+                
+                // Update position locally for responsive feedback
+                // This will be corrected when we receive the next GameState update
+                player.position = predicted_pos;
+            }
+        }
+    }
+    
+    Ok(())
 }
 
 /// Process a message received from the server

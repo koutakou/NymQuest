@@ -433,20 +433,23 @@ pub fn render_nearby_players(state: &GameState) {
 pub fn render_help_section() {
     let commands = vec![
         "Available Commands:".cyan().bold().to_string(),
-        "/register <name> - Register with the given name".to_string(),
-        "/move <direction> - Move (up, down, left, right, n, s, e, w, ne, nw, se, sw)".to_string(),
-        "/attack <player_id> - Attack player with the given display ID".to_string(),
-        "/chat <message> - Send a chat message to all players".to_string(),
-        "/help - Show this help information".to_string(),
-        "/quit - Exit the game".to_string(),
+        "/register <name>, /r <name> - Register with the given name".to_string(),
+        "/move <direction>, /m <direction>, /go <direction> - Move in a direction".to_string(),
+        "Direction shortcuts: /up (or /u, /n), /down (or /d, /s), /left (or /l, /w), /right (or /r, /e)".to_string(),
+        "Diagonal movement: /ne, /nw, /se, /sw - Move diagonally".to_string(),
+        "/attack <player_id>, /a <player_id> - Attack player with the given display ID".to_string(),
+        "/chat <message>, /c <message>, /say <message> - Send a chat message to all players".to_string(),
+        "/help, /h, /? - Show this help information".to_string(),
+        "/quit, /exit, /q - Exit the game".to_string(),
     ];
     
-    draw_box("HELP", &commands, 80);
+    draw_box("HELP", &commands, 90);
 }
 
 /// Render command input prompt
 pub fn render_input_prompt() {
-    print!("\n{} ", ">".cyan().bold());
+    print!("
+{} ", ">".cyan().bold());
     io::stdout().flush().unwrap();
 }
 
@@ -511,9 +514,9 @@ pub fn render_game_state(state: &GameState) {
             // Render abbreviated help for non-registered users
             let commands = vec![
                 "Available Commands:".cyan().bold().to_string(),
-                "/register <name> - Register with your chosen display name".to_string(),
-                "/help - Show this help information".to_string(),
-                "/quit - Exit the game".to_string(),
+                "/register <name>, /r <name> - Register with your chosen display name".to_string(),
+                "/help, /h, /? - Show this help information".to_string(),
+                "/quit, /exit, /q - Exit the game".to_string(),
             ];
             
             draw_box("COMMANDS", &commands, 70);
