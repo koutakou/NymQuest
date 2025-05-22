@@ -3,6 +3,7 @@ mod game_state;
 mod network;
 mod renderer;
 mod message_auth;
+mod ui_components;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -15,7 +16,8 @@ use std::path::PathBuf;
 use game_protocol::{ClientMessage, ServerMessage, Direction, Position};
 use game_state::GameState;
 use network::NetworkManager;
-use renderer::{render_game_state, clear_screen};
+use ui_components::{render_game_state, clear_screen, draw_box, format_chat_message};
+
 
 /// Main entry point for the NYM MMORPG Client
 #[tokio::main]
@@ -78,7 +80,13 @@ async fn main() -> anyhow::Result<()> {
             let _ = typing_tx_clone.send(true).await;
             
             // Show game state when prompt appears
-            render_game_state(&game_state_clone.lock().unwrap());
+            // Handle the mutex lock more gracefully to prevent poisoning
+            if let Ok(state) = game_state_clone.lock() {
+                render_game_state(&state);
+            } else {
+                // If mutex is poisoned, print error and continue
+                println!("{}", "Error accessing game state. Please restart the client.".red().bold());
+            }
             
             // Use rustyline to get input with history navigation
             let readline = rl.readline("> ");
@@ -338,15 +346,23 @@ async fn run_event_loop(
                 let was_chat = process_server_message(game_state, server_message);
                 
                 // Always refresh the display when we receive a chat message, even if typing
-                let state = game_state.lock().unwrap();
-                if was_chat || !state.is_typing {
-                    render_game_state(&state);
+                if let Ok(state) = game_state.lock() {
+                    if was_chat || !state.is_typing {
+                        render_game_state(&state);
+                    }
+                } else {
+                    // Handle poisoned mutex
+                    println!("{}", "Error accessing game state. Please restart the client.".red().bold());
                 }
             },
             // Check for typing state updates
             Some(is_typing) = typing_rx.recv() => {
-                let mut state = game_state.lock().unwrap();
-                state.set_typing(is_typing);
+                if let Ok(mut state) = game_state.lock() {
+                    state.set_typing(is_typing);
+                } else {
+                    // Mutex poisoned, continue gracefully
+                    println!("{}", "Error updating typing state".yellow());
+                }
             },
             // Periodically check for messages that need to be resent
             _ = check_interval.tick() => {
@@ -360,8 +376,17 @@ async fn run_event_loop(
 
 /// Process a message received from the server
 /// Returns true if the message was a chat message that should refresh the display
+/// Returns false on error or non-chat messages
 fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: ServerMessage) -> bool {
-    let mut state = game_state.lock().unwrap();
+    // Safely lock the game state and handle potential poisoning
+    let mut state = match game_state.lock() {
+        Ok(state) => state,
+        Err(e) => {
+            // Handle poisoned mutex
+            println!("{} {}", "Error accessing game state:".red().bold(), e);
+            return false; // Return false to avoid refresh
+        }
+    };
     
     let needs_refresh = match server_message.clone() {
         ServerMessage::RegisterAck { player_id, seq_num: _ } => {

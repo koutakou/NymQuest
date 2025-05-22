@@ -1,13 +1,13 @@
 # NymQuest: Privacy-Focused Multiplayer Game
 
-NymQuest is a privacy-preserving multiplayer game that leverages the Nym mixnet to ensure secure, anonymous communications between players. This innovative game demonstrates the practical application of privacy-enhancing technologies in interactive entertainment.
+NymQuest is a privacy-preserving multiplayer game that leverages the Nym mixnet to ensure secure, anonymous communications between players. This innovative game demonstrates the practical application of privacy-enhancing technologies in interactive entertainment. The game features an enhanced terminal UI with intuitive visualizations and improved player experience.
 
 ## Project Overview
 
 This project showcases how the Nym network can be used to build privacy-preserving applications beyond traditional financial or messaging use cases. The game features:
 
 - **Private Communications**: All game data is transmitted through the Nym mixnet, preventing network observers from linking players to their actions
-- **Terminal-Based Interface**: Lightweight client with colored UI for an engaging gaming experience
+- **Enhanced Terminal Interface**: Lightweight client with an improved UI featuring bordered sections, intuitive health bars, distance visualization, and color-coded player statuses for a more engaging gaming experience
 - **Real-Time Multiplayer**: Move around a 2D world, chat with other players, and engage in simple combat
 - **Anonymous Identity**: Players can create characters without revealing their real identity
 
