@@ -25,7 +25,7 @@ use config::ClientConfig;
 use game_protocol::{ClientMessage, ServerMessage, Direction, Position};
 use game_state::GameState;
 use network::NetworkManager;
-use ui_components::{render_game_state, clear_screen, draw_box, format_chat_message};
+use ui_components::{render_game_state, clear_screen, draw_panel, format_chat_message};
 
 /// Initialize structured logging for the client
 fn init_logging() -> anyhow::Result<()> {
