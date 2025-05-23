@@ -1,6 +1,7 @@
 use anyhow::Result;
 use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender};
 use std::sync::{Arc, Mutex};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, HashSet};
 use rand::{thread_rng, Rng};
@@ -25,16 +26,12 @@ fn print_direction(direction: &Direction) -> &'static str {
     }
 }
 
-// Global sequence number for server messages
-static mut SERVER_SEQ_NUM: u64 = 1;
+// Thread-safe sequence number generator for server messages
+static SERVER_SEQ_NUM: AtomicU64 = AtomicU64::new(1);
 
 // Thread-safe function to get the next server sequence number
 fn next_seq_num() -> u64 {
-    unsafe {
-        let num = SERVER_SEQ_NUM;
-        SERVER_SEQ_NUM += 1;
-        num
-    }
+    SERVER_SEQ_NUM.fetch_add(1, Ordering::SeqCst)
 }
 
 // Structure to manage replay protection using a sliding window approach
