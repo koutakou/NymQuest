@@ -23,8 +23,10 @@ The project consists of two main components:
 - Processes player commands (movement, attacks, chat)
 - Broadcasts game state updates to all connected players
 - Handles player registration and disconnection
-- **Heartbeat Monitoring**: Periodically checks for inactive players and removes them automatically
-- **Connection Management**: Tracks player activity and ensures game state consistency
+- **Background Task Scheduling**: Asynchronous event loop with concurrent task execution for optimal performance
+- **Automated Heartbeat Management**: Periodically sends heartbeat requests to maintain active connections
+- **Inactive Player Cleanup**: Automatically detects and removes disconnected players to maintain game state consistency
+- **Production-Ready Architecture**: Non-blocking concurrent processing ensures server responsiveness under load
 
 ### Client
 - Connects to the server through the Nym mixnet
@@ -41,6 +43,28 @@ The project consists of two main components:
 - **Tokio**: Asynchronous runtime for handling concurrent operations
 - **Serde**: Serialization/deserialization of game messages
 - **Colored**: Terminal text coloring for improved UI
+
+## Technical Implementation
+
+### Background Task Scheduling
+
+The server implements a production-ready concurrent event loop using Tokio's `select!` macro to handle multiple asynchronous operations simultaneously:
+
+- **Message Processing**: Handles incoming player messages through the Nym mixnet while maintaining anonymity
+- **Heartbeat Management**: Sends periodic heartbeat requests to all connected players at configurable intervals
+- **Inactive Player Cleanup**: Automatically removes players who fail to respond to heartbeat requests within the timeout period
+
+This architecture ensures:
+- **Non-blocking Operations**: Server remains responsive to new connections and messages
+- **Privacy Preservation**: All communications continue to flow through the Nym mixnet
+- **Scalable Performance**: Concurrent task execution prevents any single operation from blocking others
+- **Production Stability**: Automatic cleanup prevents memory leaks from abandoned connections
+
+### Configuration
+
+All timing parameters are configurable via environment variables:
+- `NYMQUEST_HEARTBEAT_INTERVAL_SECONDS`: Frequency of heartbeat requests (default: 30s)
+- `NYMQUEST_HEARTBEAT_TIMEOUT_SECONDS`: Player inactivity timeout (default: 90s)
 
 ## Getting Started
 

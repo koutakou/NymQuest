@@ -125,30 +125,20 @@ async fn main() -> Result<()> {
         }
     }
     
-    info!("Server ready - waiting for players to connect");
+    info!("Server is ready and listening for connections");
     
     // Create game state with loaded configuration
     let game_state = Arc::new(GameState::new_with_config(game_config.clone()));
     
-    // Spawn heartbeat task without client (simplified for now)
-    let heartbeat_game_state = Arc::clone(&game_state);
-    let heartbeat_interval = game_config.heartbeat_interval_seconds;
+    // Create periodic tasks for game state maintenance
+    let mut heartbeat_interval = interval(Duration::from_secs(game_config.heartbeat_interval_seconds));
+    let mut cleanup_interval = interval(Duration::from_secs(game_config.heartbeat_timeout_seconds / 2));
     
-    tokio::spawn(async move {
-        let mut interval = tokio::time::interval(Duration::from_secs(heartbeat_interval));
-        loop {
-            interval.tick().await;
-            
-            // Remove inactive players (without sending heartbeat requests for now)
-            let inactive_players = heartbeat_game_state.get_inactive_players();
-            if !inactive_players.is_empty() {
-                info!("Removing {} inactive players", inactive_players.len());
-                heartbeat_game_state.remove_players_by_ids(&inactive_players);
-            }
-        }
-    });
+    // Skip the first tick to avoid immediate execution
+    heartbeat_interval.tick().await;
+    cleanup_interval.tick().await;
     
-    // Main event loop
+    // Main event loop with background task scheduling
     loop {
         tokio::select! {
             // Handle incoming messages from clients
@@ -164,6 +154,20 @@ async fn main() -> Result<()> {
                         error!("Message stream ended unexpectedly");
                         break;
                     }
+                }
+            },
+            
+            // Send heartbeat requests to all connected players periodically
+            _ = heartbeat_interval.tick() => {
+                if let Err(e) = send_heartbeat_requests(&client, &game_state, &auth_key).await {
+                    error!("Failed to send heartbeat requests: {}", e);
+                }
+            },
+            
+            // Clean up inactive players periodically
+            _ = cleanup_interval.tick() => {
+                if let Err(e) = cleanup_inactive_players(&client, &game_state, &auth_key).await {
+                    error!("Failed to cleanup inactive players: {}", e);
                 }
             }
         }
