@@ -488,6 +488,26 @@ impl GameState {
         removed_players
     }
 
+    /// Restore a player from persistence (used during server recovery)
+    /// This method restores player data without creating a network connection
+    /// Players will need to reconnect to establish their mixnet connection
+    pub fn restore_player(&self, player_id: String, player: Player) {
+        match self.players.write() {
+            Ok(mut players) => {
+                players.insert(player_id.clone(), player.clone());
+                info!("Restored player {} ({}) at position ({:.1}, {:.1}) with {} health",
+                      player_id, player.name, player.position.x, player.position.y, player.health);
+            },
+            Err(e) => {
+                error!("Failed to restore player {}: {}", player_id, e);
+            }
+        }
+        
+        // Note: We intentionally do not add to connections list here
+        // Players must reconnect through the mixnet to establish their connection
+        // This preserves the privacy and security properties of the system
+    }
+
     /// Helper method to get sender tag by player ID
     fn get_sender_tag_by_player_id(&self, player_id: &str) -> Option<AnonymousSenderTag> {
         match self.connections.lock() {

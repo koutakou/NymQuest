@@ -4,6 +4,7 @@ mod handlers;
 mod utils;
 mod message_auth;
 mod config;
+mod persistence;
 
 use game_protocol::{Player, Position, ClientMessage, ServerMessage};
 use game_state::GameState;
@@ -11,6 +12,7 @@ use handlers::{handle_client_message, broadcast_game_state, send_heartbeat_reque
 use utils::save_server_address;
 use message_auth::{AuthKey, AuthenticatedMessage};
 use config::GameConfig;
+use persistence::{GameStatePersistence, PersistedPlayer};
 
 use nym_sdk::mixnet::{MixnetClient, MixnetClientBuilder, StoragePaths, AnonymousSenderTag, MixnetMessageSender, Recipient, IncludedSurbs};
 use std::path::PathBuf;
@@ -127,17 +129,96 @@ async fn main() -> Result<()> {
     
     info!("Server is ready and listening for connections");
     
-    // Create game state with loaded configuration
+    // Initialize game state persistence
+    let persistence_enabled = std::env::var("NYMQUEST_ENABLE_PERSISTENCE")
+        .map(|v| v.to_lowercase() == "true")
+        .unwrap_or(true); // Default to enabled
+    
+    let persistence_dir = std::env::var("NYMQUEST_PERSISTENCE_DIR")
+        .unwrap_or_else(|_| "./game_data".to_string());
+    
+    let persistence = GameStatePersistence::new(&persistence_dir, persistence_enabled);
+    
+    // Initialize persistence directory
+    if let Err(e) = persistence.initialize().await {
+        error!("Failed to initialize game state persistence: {}", e);
+        return Err(e);
+    }
+    
+    // Create backup of existing state before starting
+    if let Err(e) = persistence.backup_current_state().await {
+        warn!("Failed to create state backup: {}", e);
+    }
+    
+    // Initialize game state with loaded configuration
     let game_state = Arc::new(GameState::new_with_config(game_config.clone()));
+    
+    // Try to recover previous game state
+    match persistence.load_state(&game_config).await {
+        Ok(Some(mut persisted_state)) => {
+            info!("Attempting to recover previous game state");
+            
+            // Clean up stale players (offline for more than 5 minutes)
+            let cleanup_threshold = 300; // 5 minutes in seconds
+            persistence.cleanup_stale_players(&mut persisted_state, cleanup_threshold);
+            
+            // Restore player data (excluding network connections)
+            let mut recovered_count = 0;
+            for (player_id, persisted_player) in persisted_state.players {
+                // Create a new Player from persisted data
+                let player = Player {
+                    id: player_id.clone(), // Use the player_id as the internal ID
+                    display_id: persisted_player.display_id,
+                    name: persisted_player.name,
+                    position: persisted_player.position,
+                    health: persisted_player.health,
+                    last_attack_time: persisted_player.last_attack_time,
+                };
+                
+                // Validate position is still within current world boundaries
+                let (clamped_x, clamped_y) = game_config.clamp_position(player.position.x, player.position.y);
+                let adjusted_player = if clamped_x != player.position.x || clamped_y != player.position.y {
+                    warn!("Adjusted player {} position from ({}, {}) to ({}, {}) due to boundary changes",
+                          player_id, player.position.x, player.position.y, clamped_x, clamped_y);
+                    Player {
+                        id: player.id.clone(),
+                        position: Position::new(clamped_x, clamped_y),
+                        ..player
+                    }
+                } else {
+                    player
+                };
+                
+                // Add player to game state (they will need to reconnect to establish network connection)
+                game_state.restore_player(player_id, adjusted_player);
+                recovered_count += 1;
+            }
+            
+            info!("Recovered {} players from previous session", recovered_count);
+            if recovered_count > 0 {
+                info!("Recovered players will be visible once they reconnect through the mixnet");
+            }
+        },
+        Ok(None) => {
+            info!("Starting with fresh game state");
+        },
+        Err(e) => {
+            warn!("Failed to load previous game state, starting fresh: {}", e);
+        }
+    }
     
     // Create periodic tasks for game state maintenance
     let mut heartbeat_interval = interval(Duration::from_secs(game_config.heartbeat_interval_seconds));
     let mut cleanup_interval = interval(Duration::from_secs(game_config.heartbeat_timeout_seconds / 2));
     
+    // Add persistence interval (save state every 2 minutes)
+    let mut persistence_interval = interval(Duration::from_secs(120));
+    
     // Skip the first tick to avoid immediate execution
     heartbeat_interval.tick().await;
     cleanup_interval.tick().await;
-    
+    persistence_interval.tick().await;
+
     // Main event loop with background task scheduling
     loop {
         tokio::select! {
@@ -169,10 +250,30 @@ async fn main() -> Result<()> {
                 if let Err(e) = cleanup_inactive_players(&client, &game_state, &auth_key).await {
                     error!("Failed to cleanup inactive players: {}", e);
                 }
+            },
+            
+            // Save game state to disk periodically
+            _ = persistence_interval.tick() => {
+                let players = game_state.get_players();
+                if let Err(e) = persistence.save_state(&players, &game_config).await {
+                    error!("Failed to save game state: {}", e);
+                } else if !players.is_empty() {
+                    debug!("Periodically saved game state with {} players", players.len());
+                }
             }
         }
     }
     
+    info!("Server shutting down - performing final state save");
+    
+    // Perform final save before shutdown
+    let players = game_state.get_players();
+    if let Err(e) = persistence.save_state(&players, &game_config).await {
+        error!("Failed to save final game state: {}", e);
+    } else if !players.is_empty() {
+        info!("Final game state saved with {} players", players.len());
+    }
+
     info!("Server shutting down");
     
     // The client will be dropped naturally when main exits

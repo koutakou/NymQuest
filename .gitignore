@@ -26,3 +26,5 @@ server/Cargo.lock
 server/logs/
 
 client/logs/
+
+server/game_data/

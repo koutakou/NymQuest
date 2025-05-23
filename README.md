@@ -53,18 +53,39 @@ The server implements a production-ready concurrent event loop using Tokio's `se
 - **Message Processing**: Handles incoming player messages through the Nym mixnet while maintaining anonymity
 - **Heartbeat Management**: Sends periodic heartbeat requests to all connected players at configurable intervals
 - **Inactive Player Cleanup**: Automatically removes players who fail to respond to heartbeat requests within the timeout period
+- **Game State Persistence**: Automatically saves and recovers game state to ensure continuity across server restarts
 
 This architecture ensures:
 - **Non-blocking Operations**: Server remains responsive to new connections and messages
 - **Privacy Preservation**: All communications continue to flow through the Nym mixnet
 - **Scalable Performance**: Concurrent task execution prevents any single operation from blocking others
 - **Production Stability**: Automatic cleanup prevents memory leaks from abandoned connections
+- **Data Durability**: Game state persists across server restarts with automatic recovery
+
+### Game State Persistence
+
+The server includes a persistence system that automatically:
+- **Saves game state** to disk every 2 minutes while running
+- **Creates backups** before starting to prevent data loss
+- **Recovers player data** on server restart (players need to reconnect for network security)
+- **Validates compatibility** between saved state and current configuration
+- **Cleans up stale data** by removing players offline for more than 5 minutes
+- **Maintains privacy** by excluding network-sensitive information from saved data
+
+Persistence features:
+- **Atomic saves** using temporary files to prevent corruption
+- **JSON format** for human-readable state files
+- **Configurable storage** location via environment variables
+- **Graceful degradation** when persistence is disabled
+- **Position validation** to handle world boundary changes
 
 ### Configuration
 
-All timing parameters are configurable via environment variables:
+All timing and persistence parameters are configurable via environment variables:
 - `NYMQUEST_HEARTBEAT_INTERVAL_SECONDS`: Frequency of heartbeat requests (default: 30s)
 - `NYMQUEST_HEARTBEAT_TIMEOUT_SECONDS`: Player inactivity timeout (default: 90s)
+- `NYMQUEST_ENABLE_PERSISTENCE`: Enable game state persistence (default: true)
+- `NYMQUEST_PERSISTENCE_DIR`: Directory for saving game state (default: "./game_data")
 
 ## Getting Started
 

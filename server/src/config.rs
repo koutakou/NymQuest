@@ -4,6 +4,24 @@ use std::time::Duration;
 use tracing::{info, warn};
 
 /// Game configuration constants with validation and environment override support
+/// 
+/// Environment Variables:
+/// - NYMQUEST_WORLD_MAX_X: Maximum X coordinate boundary (default: 100.0)
+/// - NYMQUEST_WORLD_MIN_X: Minimum X coordinate boundary (default: -100.0)  
+/// - NYMQUEST_WORLD_MAX_Y: Maximum Y coordinate boundary (default: 100.0)
+/// - NYMQUEST_WORLD_MIN_Y: Minimum Y coordinate boundary (default: -100.0)
+/// - NYMQUEST_MOVEMENT_SPEED: Player movement speed multiplier (default: 14.0)
+/// - NYMQUEST_MAX_PLAYER_NAME_LENGTH: Maximum player name length (default: 50)
+/// - NYMQUEST_MAX_CHAT_MESSAGE_LENGTH: Maximum chat message length (default: 500)
+/// - NYMQUEST_HEARTBEAT_INTERVAL_SECONDS: Heartbeat request interval (default: 30)
+/// - NYMQUEST_HEARTBEAT_TIMEOUT_SECONDS: Player inactivity timeout (default: 90)
+/// - NYMQUEST_MAX_PLAYERS: Maximum concurrent players (default: 100)
+/// - NYMQUEST_ATTACK_COOLDOWN_SECONDS: Attack cooldown period (default: 3)
+/// - NYMQUEST_INITIAL_PLAYER_HEALTH: Starting player health (default: 100)
+/// - NYMQUEST_ATTACK_DAMAGE: Base attack damage (default: 20)
+/// - NYMQUEST_ATTACK_RANGE: Attack range in world units (default: 28.0)
+/// - NYMQUEST_ENABLE_PERSISTENCE: Enable game state persistence (default: true)
+/// - NYMQUEST_PERSISTENCE_DIR: Directory for saving game state (default: "./game_data")
 #[derive(Debug, Clone)]
 pub struct GameConfig {
     /// Maximum X coordinate boundary for the game world
