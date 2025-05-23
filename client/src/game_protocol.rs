@@ -185,15 +185,19 @@ pub enum Direction {
 impl Direction {
     // Converts a direction to a movement vector
     pub fn to_vector(&self) -> (f32, f32) {
+        // 1/sqrt(2) ≈ 0.7071 is the correct normalization factor for diagonal movement
+        // This ensures that diagonal movement has the same speed as cardinal movement
+        let diag = 0.7071;
+        
         match self {
             Direction::Up => (0.0, -1.0),
             Direction::Down => (0.0, 1.0),
             Direction::Left => (-1.0, 0.0),
             Direction::Right => (1.0, 0.0),
-            Direction::UpLeft => (-0.7, -0.7),    // Normalized diagonal vectors
-            Direction::UpRight => (0.7, -0.7),
-            Direction::DownLeft => (-0.7, 0.7),
-            Direction::DownRight => (0.7, 0.7),
+            Direction::UpLeft => (-diag, -diag),    // Properly normalized diagonal vectors
+            Direction::UpRight => (diag, -diag),
+            Direction::DownLeft => (-diag, diag),
+            Direction::DownRight => (diag, diag),
         }
     }
     
