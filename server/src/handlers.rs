@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::collections::{HashMap, HashSet};
 use rand::{thread_rng, Rng};
+use tracing::{info, warn, error, debug, trace};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
@@ -125,7 +126,7 @@ fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
             window.process(seq_num)
         },
         Err(e) => {
-            println!("Warning: Failed to access replay protection data: {}", e);
+            error!("Warning: Failed to access replay protection data: {}", e);
             // In case of mutex poisoning, err on the side of caution and allow the message
             false
         }
@@ -192,7 +193,7 @@ pub async fn broadcast_game_state(
         
         // Send the update to this player and track failures
         if let Err(e) = client.send_reply(tag.clone(), serialized.clone()).await {
-            println!("Failed to send game state to player {}: {}", player_id, e);
+            error!("Failed to send game state to player {}: {}", player_id, e);
             failed_tags.push(tag);
         }
     }
@@ -200,7 +201,7 @@ pub async fn broadcast_game_state(
     // Clean up any players that we couldn't reach
     for tag in failed_tags {
         if let Some(player_id) = game_state.remove_player(&tag) {
-            println!("Removed unreachable player: {}", player_id);
+            info!("Removed unreachable player: {}", player_id);
         }
     }
     
@@ -227,7 +228,7 @@ pub async fn handle_client_message(
     
     // Check for message replay, but only for non-ack messages
     if is_message_replay(&sender_tag, seq_num) {
-        println!("Detected replay attack or duplicate message: seq {} from {:?}", seq_num, sender_tag);
+        warn!("Detected replay attack or duplicate message: seq {} from {:?}", seq_num, sender_tag);
         return Ok(());
     }
     
@@ -281,7 +282,7 @@ async fn handle_register(
         // Send the error message to the client
         client.send_reply(sender_tag.clone(), error_json).await?;
         
-        println!("Registration attempt rejected: Client already registered as {}", existing_player_id);
+        info!("Registration attempt rejected: Client already registered as {}", existing_player_id);
         return Ok(());
     }
     
@@ -304,7 +305,7 @@ async fn handle_register(
     // Broadcast updated game state to all players
     broadcast_game_state(client, game_state, None, auth_key).await?;
     
-    println!("New player registered: {}", player_id);
+    info!("New player registered: {}", player_id);
     Ok(())
 }
 
@@ -407,7 +408,7 @@ async fn handle_attack(
             }
         };
         
-        println!("Player {} attacking player with display ID {}", attacker_id, target_display_id);
+        info!("Player {} attacking player with display ID {}", attacker_id, target_display_id);
         
         // Get current time
         let now = SystemTime::now()
@@ -601,14 +602,14 @@ async fn handle_chat(
             
             // Send confirmation to the original sender
             if let Err(e) = client.send_reply(sender_tag.clone(), confirm_serialized).await {
-                println!("Failed to send confirmation to sender {}: {}", sender_id, e);
+                error!("Failed to send confirmation to sender {}: {}", sender_id, e);
             } else {
-                println!("Confirmation sent to sender {}", sender_id);
+                info!("Confirmation sent to sender {}", sender_id);
             }
             
             // Get a copy of all active connections
             let connections = game_state.get_connections();
-            println!("Broadcasting chat to {} players", connections.len());
+            info!("Broadcasting chat to {} players", connections.len());
             
             // Prepare exclude tag as bytes for more reliable comparison
             let exclude_bytes = sender_tag.to_string().into_bytes();
@@ -618,16 +619,16 @@ async fn handle_chat(
                 if tag.to_string().into_bytes() != exclude_bytes {
                     match client.send_reply(tag.clone(), serialized.clone()).await {
                         Ok(_) => {
-                            println!("Chat message sent to player {}", player_id);
+                            info!("Chat message sent to player {}", player_id);
                         },
                         Err(e) => {
-                            println!("Failed to send chat message to player {}: {}", player_id, e);
+                            error!("Failed to send chat message to player {}: {}", player_id, e);
                         }
                     }
                 }
             }
             
-            println!("Chat message from {}: {}", sender_name, message);
+            info!("Chat message from {}: {}", sender_name, message);
         }
     }
     
@@ -643,7 +644,7 @@ async fn handle_disconnect(
 ) -> Result<()> {
     // Remove the player
     if let Some(player_id) = game_state.remove_player(&sender_tag) {
-        println!("Player {} disconnected", player_id);
+        info!("Player {} disconnected", player_id);
         
         // Broadcast the updated game state to all remaining players
         broadcast_game_state(client, game_state, None, auth_key).await?;

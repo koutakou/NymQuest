@@ -22,3 +22,7 @@ client/Cargo.lock
 client/server_address.txt
 
 server/Cargo.lock
+
+server/logs/
+
+client/logs/

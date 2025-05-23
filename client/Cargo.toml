@@ -17,6 +17,10 @@ colored = "2.0"
 rustyline = "10.0.0"
 dirs-next = "2.0.0"
 chrono = "0.4"
+# Enhanced logging support
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
 # Added for message authentication
 hmac = "0.12"
 sha2 = "0.10"

@@ -9,6 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::time;
+use tracing::{info, warn, error, debug};
 
 // Import message authentication module
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
@@ -72,7 +73,7 @@ impl NetworkManager {
             }
         };
         
-        println!("Server address: {}", server_address);
+        info!("Server address: {}", server_address);
         
         // Configure Nym client with a unique directory for each instance
         // Generate a unique ID for this client to prevent connection conflicts
@@ -80,14 +81,14 @@ impl NetworkManager {
         let config_dir = PathBuf::from(format!("/tmp/nym_mmorpg_client_{}", unique_id));
         let storage_paths = StoragePaths::new_from_dir(&config_dir)?;
         
-        println!("Initializing Nym client with unique ID...");
+        info!("Initializing Nym client with unique ID...");
         let client = MixnetClientBuilder::new_with_default_storage(storage_paths)
             .await?
             .build()?;
         
         let client = client.connect_to_mixnet().await?;
         
-        println!("Connected to Nym network!");
+        info!("Connected to Nym network!");
         
         Ok(Self {
             client: Some(client),
@@ -217,7 +218,7 @@ impl NetworkManager {
                     self.retry_count.insert(seq_num, retry_count + 1);
                 } else {
                     // Too many retries, mark for removal
-                    println!("Warning: Message {} of type {:?} not acknowledged after {} retries", 
+                    warn!("Message {} of type {:?} not acknowledged after {} retries", 
                              seq_num, msg_type, MAX_RETRIES);
                     to_remove.push(seq_num);
                 }
@@ -242,41 +243,41 @@ impl NetworkManager {
             let message = if let Some(original) = self.original_messages.get(&seq_num) {
                 match original {
                     OriginalMessage::Register { name } => {
-                        println!("Resending Register with original name: {}", name);
+                        debug!("Resending Register with original name: {}", name);
                         ClientMessage::Register { 
                             name: name.clone(), 
                             seq_num 
                         }
                     },
                     OriginalMessage::Move { direction } => {
-                        println!("Resending Move with original direction: {:?}", direction);
+                        debug!("Resending Move with original direction: {:?}", direction);
                         ClientMessage::Move { 
                             direction: *direction, 
                             seq_num 
                         }
                     },
                     OriginalMessage::Attack { target_display_id } => {
-                        println!("Resending Attack with original target: {}", target_display_id);
+                        debug!("Resending Attack with original target: {}", target_display_id);
                         ClientMessage::Attack { 
                             target_display_id: target_display_id.clone(), 
                             seq_num 
                         }
                     },
                     OriginalMessage::Chat { message } => {
-                        println!("Resending Chat with original message: {}", message);
+                        debug!("Resending Chat with original message: {}", message);
                         ClientMessage::Chat { 
                             message: message.clone(), 
                             seq_num 
                         }
                     },
                     OriginalMessage::Disconnect => {
-                        println!("Resending Disconnect");
+                        debug!("Resending Disconnect");
                         ClientMessage::Disconnect { seq_num }
                     },
                 }
             } else {
                 // Fallback if original message is somehow not available
-                println!("Warning: Original message data not found for seq_num {}", seq_num);
+                warn!("Original message data not found for seq_num {}", seq_num);
                 match msg_type {
                     ClientMessageType::Register => {
                         ClientMessage::Register { 
@@ -325,7 +326,7 @@ impl NetworkManager {
                 
                 client.send_message(recipient, message_str.into_bytes(), IncludedSurbs::default()).await?;
             
-                println!("Resending message {} of type {:?} (retry {})", 
+                debug!("Resending message {} of type {:?} (retry {})", 
                          seq_num, msg_type, self.retry_count.get(&seq_num).copied().unwrap_or(0));
             }
         }
@@ -356,7 +357,7 @@ impl NetworkManager {
         let message_str = match String::from_utf8(received_message.message) {
             Ok(str) => str,
             Err(e) => {
-                println!("Error parsing message: {}", e);
+                error!("Error parsing message: {}", e);
                 return None;
             }
         };
@@ -373,14 +374,14 @@ impl NetworkManager {
                     Ok(false) => {
                         // Instead of rejecting immediately, log the issue but still process the message
                         // This allows for better compatibility during transitions or minor desync issues
-                        println!("Warning: Message authentication weak - proceeding with caution");
+                        warn!("Message authentication weak - proceeding with caution");
                         authenticated_message.message
                     },
                     Err(e) => {
                         // Sanitize the error message to not reveal sensitive information
-                        println!("Error verifying message authenticity: Authentication error");
+                        error!("Error verifying message authenticity: Authentication error");
                         // Log the full error for debugging but keep it private
-                        println!("Debug info [not displayed to user]: {}", e);
+                        debug!("Debug info [not displayed to user]: {}", e);
                         return None;
                     }
                 }
@@ -389,11 +390,11 @@ impl NetworkManager {
             Err(_) => {
                 match serde_json::from_str::<ServerMessage>(&message_str) {
                     Ok(msg) => {
-                        println!("Received non-authenticated message (this is expected during transition)");
+                        debug!("Received non-authenticated message (this is expected during transition)");
                         msg
                     },
                     Err(e) => {
-                        println!("Error deserializing server message: {}", e);
+                        error!("Error deserializing server message: {}", e);
                         return None;
                     }
                 }
@@ -408,7 +409,7 @@ impl NetworkManager {
         if let ServerMessage::Ack { client_seq_num, original_type } = &server_message {
             // Remove from pending acks when we receive an ack
             if self.pending_acks.remove(&client_seq_num).is_some() {
-                println!("Received acknowledgment for message {} of type {:?}", client_seq_num, original_type);
+                debug!("Received acknowledgment for message {} of type {:?}", client_seq_num, original_type);
                 // Also remove retry count and original message
                 self.retry_count.remove(&client_seq_num);
                 self.original_messages.remove(&client_seq_num);
@@ -421,7 +422,7 @@ impl NetworkManager {
         // the original message of that type
         if let Some(implicit_ack_seq) = self.get_implicit_ack_seq(&server_message) {
             if self.pending_acks.remove(&implicit_ack_seq).is_some() {
-                println!("Implicit acknowledgment received for message {}", implicit_ack_seq);
+                debug!("Implicit acknowledgment received for message {}", implicit_ack_seq);
                 // Also remove retry count and original message
                 self.retry_count.remove(&implicit_ack_seq);
                 self.original_messages.remove(&implicit_ack_seq);
@@ -430,7 +431,7 @@ impl NetworkManager {
         
         // Check if we've already processed this message
         if self.received_server_msgs.contains(&seq_num) {
-            println!("Ignoring duplicate message with seq_num {}", seq_num);
+            debug!("Ignoring duplicate message with seq_num {}", seq_num);
             return None;
         }
         
@@ -442,7 +443,7 @@ impl NetworkManager {
         
         // Send the acknowledgement (fire and forget)
         if let Err(e) = self.send_message(ack_message).await {
-            println!("Failed to send acknowledgement: {}", e);
+            error!("Failed to send acknowledgement: {}", e);
         }
         
         // Record that we've received this message
@@ -462,14 +463,14 @@ impl NetworkManager {
     /// Disconnect from the Nym network
     pub async fn disconnect(&mut self) -> Result<()> {
         if let Some(client) = self.client.take() {
-            println!("Disconnecting from Nym network...");
+            info!("Disconnecting from Nym network...");
             
             // Send a disconnect message before actually disconnecting
             // If we still have a client reference
             if let Some(ref mut client_ref) = self.client {
                 let disconnect_msg = ClientMessage::Disconnect { seq_num: self.next_seq_num };
                 if let Err(e) = self.send_message(disconnect_msg).await {
-                    println!("Failed to send disconnect message: {}", e);
+                    error!("Failed to send disconnect message: {}", e);
                 } else {
                     // Wait a short time for the message to be sent before disconnecting
                     time::sleep(Duration::from_millis(300)).await;
@@ -478,10 +479,10 @@ impl NetworkManager {
             
             // Properly await the disconnection to ensure it completes
             client.disconnect().await;
-            println!("Disconnected.");
+            info!("Disconnected.");
             Ok(())
         } else {
-            println!("Already disconnected.");
+            info!("Already disconnected.");
             Ok(())
         }
     }

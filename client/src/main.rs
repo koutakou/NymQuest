@@ -13,6 +13,8 @@ use colored::*;
 use rustyline::error::ReadlineError;
 use rustyline::{Editor, Config};
 use std::path::PathBuf;
+use tracing::{info, warn, error, debug};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use command_completer::GameHistoryHinter;
 use ui_components::render_help_section;
@@ -22,10 +24,53 @@ use game_state::GameState;
 use network::NetworkManager;
 use ui_components::{render_game_state, clear_screen, draw_box, format_chat_message};
 
+/// Initialize structured logging for the client
+fn init_logging() -> anyhow::Result<()> {
+    // Create a rolling file appender for production logs
+    let file_appender = tracing_appender::rolling::daily("logs", "nymquest-client.log");
+    let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
+    
+    // Set up console output with filtering for better UX
+    // Use a restrictive filter to only show our application logs, not noisy network libraries
+    let console_filter = EnvFilter::new("nym_mmorpg_client=info");
+    
+    let console_layer = tracing_subscriber::fmt::layer()
+        .with_target(false)
+        .with_level(true)
+        .compact()
+        .with_filter(console_filter);
+    
+    // Set up file output with JSON formatting for production parsing
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(file_writer)
+        .json()
+        .with_target(true)
+        .with_current_span(false);
+    
+    // Initialize the subscriber with environment-based filtering for file logs
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("info"));
+    
+    tracing_subscriber::registry()
+        .with(console_layer)
+        .with(file_layer.with_filter(filter))
+        .init();
+    
+    info!("Client structured logging initialized");
+    Ok(())
+}
+
 
 /// Main entry point for the NYM MMORPG Client
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Initialize logging first
+    if let Err(e) = init_logging() {
+        eprintln!("Failed to initialize logging: {}", e);
+        return Err(e);
+    }
+    
+    info!("=== NYM MMORPG Client Starting ===");
     println!("{}", "=== NYM MMORPG Client ===".green().bold());
     
     // Initialize the game state
@@ -35,7 +80,7 @@ async fn main() -> anyhow::Result<()> {
     let mut network = match NetworkManager::new().await {
         Ok(network) => network,
         Err(e) => {
-            println!("{} {}", "Error:".red().bold(), e);
+            error!("Error initializing network connection: {}", e);
             return Ok(());
         }
     };
@@ -52,7 +97,7 @@ async fn main() -> anyhow::Result<()> {
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".nym_mmorpg_history");
         
-    println!("{} {}", "Command history saved to:".cyan(), history_path.display());
+    info!("Command history saved to: {}", history_path.display());
     
     // Clone necessary values for the input handling task
     let tx_clone = tx.clone();
@@ -74,7 +119,7 @@ async fn main() -> anyhow::Result<()> {
                 editor
             },
             Err(e) => {
-                println!("Error initializing editor: {}", e);
+                error!("Error initializing editor: {}", e);
                 return;
             }
         };
@@ -84,7 +129,7 @@ async fn main() -> anyhow::Result<()> {
             // Only print a warning if the file exists but couldn't be loaded
             // It's normal for it not to exist on the first run
             if history_path.exists() {
-                println!("Warning: Failed to load command history: {}", e);
+                warn!("Failed to load command history: {}", e);
             }
         }
         
@@ -99,7 +144,7 @@ async fn main() -> anyhow::Result<()> {
                 render_game_state(&state);
             } else {
                 // If mutex is poisoned, print error and continue
-                println!("{}", "Error accessing game state. Please restart the client.".red().bold());
+                error!("Failed to access game state. Please restart the client.");
             }
             
             // Use rustyline to get input with history navigation
@@ -121,7 +166,7 @@ async fn main() -> anyhow::Result<()> {
                     
                     // Save history periodically
                     if let Err(e) = rl.save_history(&history_path) {
-                        println!("Warning: Failed to save history: {}", e);
+                        warn!("Failed to save history: {}", e);
                     }
                     
                     // Send the command to main thread
@@ -131,17 +176,17 @@ async fn main() -> anyhow::Result<()> {
                 },
                 Err(ReadlineError::Interrupted) => {
                     // Ctrl-C pressed
-                    println!("CTRL-C pressed, use 'exit' to quit properly");
+                    info!("CTRL-C pressed, use 'exit' to quit properly");
                 },
                 Err(ReadlineError::Eof) => {
                     // Ctrl-D pressed, exit properly
-                    println!("EOF (CTRL-D) detected, exiting...");
+                    info!("EOF (CTRL-D) detected, exiting...");
                     let exit_command = "exit".to_string();
                     let _ = tx_clone.send(exit_command).await;
                     break;
                 },
                 Err(err) => {
-                    println!("Error reading input: {}", err);
+                    error!("Error reading input: {}", err);
                     break;
                 }
             }
@@ -154,9 +199,8 @@ async fn main() -> anyhow::Result<()> {
             render_game_state(&state);
         },
         Err(e) => {
-            println!("{} Failed to render initial game state: {}", 
-                     "Warning:".yellow().bold(), e);
-            println!("{}", "Continuing without initial render...".yellow());
+            error!("Failed to render initial game state: {}", e);
+            info!("Continuing without initial render...");
         }
     }
     
@@ -167,11 +211,11 @@ async fn main() -> anyhow::Result<()> {
     // which our implementation doesn't currently have
     match result {
         Ok(_) => {
-            println!("Disconnected. Goodbye!");
+            info!("Disconnected. Goodbye!");
             Ok(())
         },
         Err(e) => {
-            println!("{} {}", "Error in event loop:".red().bold(), e);
+            error!("Error in event loop: {}", e);
             Err(e)
         }
     }
@@ -198,17 +242,16 @@ async fn process_user_command(
             // Check if the player is already registered
             if let Ok(state) = game_state.lock() {
                 if state.is_registered() {
-                    println!("{}", "You are already registered. Please disconnect first before registering again.".yellow());
+                    info!("You are already registered. Please disconnect first before registering again.");
                     return Ok(());
                 }
             } else {
-                println!("{} Failed to access game state for registration check: {}", 
-                         "Warning:".yellow().bold(), "Please restart the client.");
+                error!("Failed to access game state for registration check. Please restart the client.");
                 return Ok(());
             }
             
             if command_parts.len() < 2 {
-                println!("{}", "Please provide a name to register with".yellow());
+                info!("Please provide a name to register with");
                 return Ok(());
             }
             
@@ -223,7 +266,7 @@ async fn process_user_command(
             // Send the message
             network.send_message(register_msg).await?;
             
-            println!("{}", "Registration request sent...".green());
+            info!("Registration request sent...");
         },
         // Movement commands
         "move" | "m" | "go" => {
@@ -232,19 +275,18 @@ async fn process_user_command(
                 if let Ok(state) = game_state.lock() {
                     state.get_player_id().map(|id| id.to_string())
                 } else {
-                    println!("{} Failed to access game state for player ID: {}", 
-                             "Warning:".yellow().bold(), "Please restart the client.");
+                    error!("Failed to access game state for player ID. Please restart the client.");
                     return Ok(());
                 }
             };
             
             if player_id.is_none() {
-                println!("{}", "You need to register first!".red());
+                info!("You need to register first!");
                 return Ok(());
             }
             
             if command_parts.len() < 2 {
-                println!("{}", "Please specify a direction (up, down, left, right, etc.)".yellow());
+                info!("Please specify a direction (up, down, left, right, etc.)");
                 return Ok(());
             }
             
@@ -279,9 +321,9 @@ async fn process_user_command(
                                 new_pos.apply_movement(move_vector, mini_map_cell_size);
                                 
                                 clear_screen();
-                                println!("Moving {:?}", direction);
-                                println!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
-                                println!("Predicted position: ({:.1}, {:.1})", new_pos.x, new_pos.y);
+                                info!("Moving {:?}", direction);
+                                info!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
+                                info!("Predicted position: ({:.1}, {:.1})", new_pos.x, new_pos.y);
                                 
                                 // Update position locally for responsive feedback
                                 // This will be corrected when we receive the next GameState update
@@ -296,9 +338,8 @@ async fn process_user_command(
                     },
                     Err(e) => {
                         // Handle poisoned mutex gracefully
-                        println!("{} Failed to access game state for movement prediction: {}", 
-                                 "Warning:".yellow().bold(), e);
-                        println!("{}", "Movement will proceed without local prediction.".yellow());
+                        error!("Failed to access game state for movement prediction: {}", e);
+                        info!("Movement will proceed without local prediction.");
                         None
                     }
                 };
@@ -306,7 +347,7 @@ async fn process_user_command(
             
             // Message already sent above, no need to send it again
             } else {
-                println!("{}", "Invalid direction! Valid options: up, down, left, right, upleft, upright, downleft, downright".red());
+                info!("Invalid direction! Valid options: up, down, left, right, upleft, upright, downleft, downright");
             }
         },
         // Direct movement shortcuts - these are more ergonomic than typing "/move <direction>"
@@ -341,17 +382,16 @@ async fn process_user_command(
             // Check if player is registered
             if let Ok(state) = game_state.lock() {
                 if !state.is_registered() {
-                    println!("You need to register first before you can attack.");
+                    info!("You need to register first before you can attack.");
                     return Ok(());
                 }
             } else {
-                println!("{} Failed to access game state for registration check: {}", 
-                         "Warning:".yellow().bold(), "Please restart the client.");
+                error!("Failed to access game state for registration check. Please restart the client.");
                 return Ok(());
             }
             
             if command_parts.len() < 2 {
-                println!("Usage: attack <player_display_id>");
+                info!("Usage: attack <player_display_id>");
                 return Ok(());
             }
             
@@ -362,24 +402,23 @@ async fn process_user_command(
             };
             
             network.send_message(attack_msg).await?;
-            println!("Attack request sent to player '{}'...", target_display_id);
+            info!("Attack request sent to player '{}'...", target_display_id);
         },
         // Chat command
         "chat" | "c" | "say" => {
             // Check if player is registered
             if let Ok(state) = game_state.lock() {
                 if !state.is_registered() {
-                    println!("You need to register first before you can chat.");
+                    info!("You need to register first before you can chat.");
                     return Ok(());
                 }
             } else {
-                println!("{} Failed to access game state for registration check: {}", 
-                         "Warning:".yellow().bold(), "Please restart the client.");
+                error!("Failed to access game state for registration check. Please restart the client.");
                 return Ok(());
             }
             
             if command_parts.len() < 2 {
-                println!("Usage: chat <message>");
+                info!("Usage: chat <message>");
                 return Ok(());
             }
             
@@ -390,7 +429,7 @@ async fn process_user_command(
             };
             
             network.send_message(chat_msg).await?;
-            println!("Chat message sent...");
+            info!("Chat message sent...");
         },
         // Exit commands
         "exit" | "quit" | "q" => {
@@ -399,22 +438,21 @@ async fn process_user_command(
                 if state.is_registered() {
                     let disconnect_msg = ClientMessage::Disconnect { seq_num: 0 };
                     if let Err(e) = network.send_message(disconnect_msg).await {
-                        println!("Failed to send disconnect message: {}", e);
+                        error!("Failed to send disconnect message: {}", e);
                     } else {
-                        println!("Disconnect message sent to server");
+                        info!("Disconnect message sent to server");
                     }
                 }
             } else {
-                println!("{} Failed to access game state for registration check: {}", 
-                         "Warning:".yellow().bold(), "Please restart the client.");
+                error!("Failed to access game state for registration check. Please restart the client.");
             }
             
             // Perform proper network disconnection
             if let Err(e) = network.disconnect().await {
-                println!("Error during disconnection: {}", e);
+                error!("Error during disconnection: {}", e);
             }
             
-            println!("Goodbye!");
+            info!("Goodbye!");
             std::process::exit(0);
         },
         // Help command
@@ -422,14 +460,13 @@ async fn process_user_command(
             if let Ok(state) = game_state.lock() {
                 render_help_section();
             } else {
-                println!("{} Failed to access game state for help: {}", 
-                         "Warning:".yellow().bold(), "Please restart the client.");
+                error!("Failed to access game state for help. Please restart the client.");
             }
             return Ok(());
         },
         _ => {
-            println!("Unknown command: {}", command_parts[0]);
-            println!("Type {} for available commands", "/help".cyan());
+            info!("Unknown command: {}", command_parts[0]);
+            info!("Type {} for available commands", "/help".cyan());
         }
     }
     
@@ -452,7 +489,7 @@ async fn run_event_loop(
             // Process user commands
             Some(command) = rx.recv() => {
                 if let Err(e) = process_user_command(network, game_state, command).await {
-                    println!("{} {}", "Error processing command:".red().bold(), e);
+                    error!("Error processing command: {}", e);
                 }
                 // Don't render here as it's done in the input handler now
             },
@@ -468,7 +505,7 @@ async fn run_event_loop(
                     }
                 } else {
                     // Handle poisoned mutex
-                    println!("{} {}", "Error accessing game state:".red().bold(), "Please restart the client.");
+                    error!("Error accessing game state. Please restart the client.");
                 }
             },
             // Check for typing state updates
@@ -477,13 +514,13 @@ async fn run_event_loop(
                     state.set_typing(is_typing);
                 } else {
                     // Mutex poisoned, continue gracefully
-                    println!("{} {}", "Warning:".yellow().bold(), "Failed to update typing state.");
+                    error!("Failed to update typing state.");
                 }
             },
             // Periodically check for messages that need to be resent
             _ = check_interval.tick() => {
                 if let Err(e) = network.check_for_resends().await {
-                    println!("Error checking for messages to resend: {}", e);
+                    error!("Error checking for messages to resend: {}", e);
                 }
             }
         }
@@ -502,14 +539,13 @@ async fn handle_movement_direction(
         if let Ok(state) = game_state.lock() {
             state.get_player_id().map(|id| id.to_string())
         } else {
-            println!("{} Failed to access game state for player ID: {}", 
-                     "Warning:".yellow().bold(), "Please restart the client.");
+            error!("Failed to access game state for player ID. Please restart the client.");
             return Ok(());
         }
     };
     
     if player_id.is_none() {
-        println!("{}", "You need to register first!".red());
+        info!("You need to register first!");
         return Ok(());
     }
     
@@ -541,9 +577,9 @@ async fn handle_movement_direction(
                         new_pos.apply_movement(move_vector, mini_map_cell_size);
                         
                         clear_screen();
-                        println!("Moving {:?}", direction);
-                        println!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
-                        println!("Predicted position: ({:.1}, {:.1})", new_pos.x, new_pos.y);
+                        info!("Moving {:?}", direction);
+                        info!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
+                        info!("Predicted position: ({:.1}, {:.1})", new_pos.x, new_pos.y);
                         
                         // Update position locally for responsive feedback
                         // This will be corrected when we receive the next GameState update
@@ -558,9 +594,8 @@ async fn handle_movement_direction(
             },
             Err(e) => {
                 // Handle poisoned mutex gracefully
-                println!("{} Failed to access game state for movement prediction: {}", 
-                         "Warning:".yellow().bold(), e);
-                println!("{}", "Movement will proceed without local prediction.".yellow());
+                error!("Failed to access game state for movement prediction: {}", e);
+                info!("Movement will proceed without local prediction.");
                 None
             }
         };
@@ -578,7 +613,7 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
         Ok(state) => state,
         Err(e) => {
             // Handle poisoned mutex
-            println!("{} {}", "Error accessing game state:".red().bold(), e);
+            error!("Error accessing game state: {}", e);
             return false; // Return false to avoid refresh
         }
     };
@@ -586,18 +621,17 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
     let needs_refresh = match server_message.clone() {
         ServerMessage::RegisterAck { player_id, seq_num: _ } => {
             state.set_player_id(player_id);
-            println!("{}", "Registration successful!".green().bold());
+            info!("Registration successful!");
             render_game_state(&state);
             false
         },
         ServerMessage::GameState { players, seq_num: _ } => {
             // Debugging output
-            println!("{} {}", "Received game state with".cyan().bold(), 
-                     format!("{} players", players.len()).yellow().bold());
+            info!("Received game state with {} players", players.len());
             
             // Print player IDs
             for player_id in players.keys() {
-                println!("  - Player ID: {}", player_id.cyan());
+                info!("  - Player ID: {}", player_id.cyan());
             }
             
             state.update_players(players);
@@ -609,7 +643,7 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
         ServerMessage::Event { message, seq_num: _ } => {
             // Add events to chat history as system messages
             state.add_chat_message("System".to_string(), message.clone());
-            println!("{} {}", "Event:".yellow().bold(), message.yellow());
+            info!("Event: {}", message.yellow());
             true
         },
         ServerMessage::ChatMessage { sender_name, message, seq_num: _ } => {
@@ -617,13 +651,13 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
             state.add_chat_message(sender_name.clone(), message.clone());
             
             // Also print it for immediate visibility
-            println!("[{}]: {}", sender_name.green(), message.white());
+            info!("[{}]: {}", sender_name.green(), message.white());
             true
         },
         ServerMessage::Error { message, seq_num: _ } => {
             // Add errors to chat history as system messages
             state.add_chat_message("System Error".to_string(), message.clone());
-            println!("{} {}", "Error:".red().bold(), message.red());
+            error!("Error: {}", message.red());
             true
         },
         ServerMessage::Ack { client_seq_num: _, original_type: _ } => {

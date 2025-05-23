@@ -3,6 +3,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::{thread_rng, Rng};
+use tracing::{warn, error, debug};
 
 use nym_sdk::mixnet::AnonymousSenderTag;
 use crate::game_protocol::{Player, Position};
@@ -37,7 +38,7 @@ impl GameState {
             match self.players.lock() {
                 Ok(state) => self.generate_available_position(&state),
                 Err(e) => {
-                    println!("Warning: Failed to access players for position generation: {}", e);
+                    warn!("Failed to access players for position generation: {}", e);
                     // Return a default position if mutex is poisoned
                     Position::new(0.0, 0.0)
                 }
@@ -80,7 +81,7 @@ impl GameState {
                     current_id
                 },
                 Err(e) => {
-                    println!("Warning: Failed to access players for display ID generation: {}", e);
+                    warn!("Failed to access players for display ID generation: {}", e);
                     // Fallback to a UUID-based display ID if mutex is poisoned
                     format!("Player_{}", Uuid::new_v4().simple().to_string()[..8].to_uppercase())
                 }
@@ -103,7 +104,7 @@ impl GameState {
                 players.insert(player_id.clone(), player);
             },
             Err(e) => {
-                println!("Error: Failed to add player to game state: {}", e);
+                error!("Failed to add player to game state: {}", e);
                 return player_id; // Return the ID even if we couldn't add the player
             }
         }
@@ -114,7 +115,7 @@ impl GameState {
                 connections.push((player_id.clone(), sender_tag));
             },
             Err(e) => {
-                println!("Error: Failed to store connection: {}", e);
+                error!("Failed to store connection: {}", e);
             }
         }
         
@@ -139,7 +140,7 @@ impl GameState {
                     }
                 },
                 Err(e) => {
-                    println!("Warning: Failed to access connections for player removal: {}", e);
+                    warn!("Failed to access connections for player removal: {}", e);
                 }
             }
         }
@@ -152,7 +153,7 @@ impl GameState {
                     connections.remove(index);
                 },
                 Err(e) => {
-                    println!("Error: Failed to remove connection: {}", e);
+                    error!("Failed to remove connection: {}", e);
                 }
             }
             
@@ -163,7 +164,7 @@ impl GameState {
                         players.remove(id);
                     },
                     Err(e) => {
-                        println!("Error: Failed to remove player from game state: {}", e);
+                        error!("Failed to remove player from game state: {}", e);
                     }
                 }
             }
@@ -184,7 +185,7 @@ impl GameState {
                 None
             },
             Err(e) => {
-                println!("Warning: Failed to access connections for player ID retrieval: {}", e);
+                warn!("Failed to access connections for player ID retrieval: {}", e);
                 None
             }
         }
@@ -195,7 +196,7 @@ impl GameState {
         match self.players.lock() {
             Ok(players) => players.clone(),
             Err(e) => {
-                println!("Warning: Failed to access players for retrieval: {}", e);
+                warn!("Failed to access players for retrieval: {}", e);
                 HashMap::new()
             }
         }
@@ -206,7 +207,7 @@ impl GameState {
         match self.players.lock() {
             Ok(players) => players.get(player_id).cloned(),
             Err(e) => {
-                println!("Warning: Failed to access players for retrieval: {}", e);
+                warn!("Failed to access players for retrieval: {}", e);
                 None
             }
         }
@@ -224,7 +225,7 @@ impl GameState {
                 None
             },
             Err(e) => {
-                println!("Warning: Failed to access players for display ID lookup: {}", e);
+                warn!("Failed to access players for display ID lookup: {}", e);
                 None
             }
         }
@@ -252,7 +253,7 @@ impl GameState {
                 })
             },
             Err(e) => {
-                println!("Warning: Failed to access players for position update: {}", e);
+                warn!("Failed to access players for position update: {}", e);
                 false
             }
         }
@@ -283,7 +284,7 @@ impl GameState {
                 }
             },
             Err(e) => {
-                println!("Warning: Failed to access players for damage application: {}", e);
+                warn!("Failed to access players for damage application: {}", e);
             }
         }
         
@@ -299,7 +300,7 @@ impl GameState {
                 }
             },
             Err(e) => {
-                println!("Warning: Failed to access players for attack time update: {}", e);
+                warn!("Failed to access players for attack time update: {}", e);
             }
         }
     }
@@ -317,7 +318,7 @@ impl GameState {
                 false
             },
             Err(e) => {
-                println!("Warning: Failed to access players for attack cooldown check: {}", e);
+                warn!("Failed to access players for attack cooldown check: {}", e);
                 false
             }
         }
@@ -328,7 +329,7 @@ impl GameState {
         match self.connections.lock() {
             Ok(connections) => connections.clone(),
             Err(e) => {
-                println!("Warning: Failed to access connections for retrieval: {}", e);
+                warn!("Failed to access connections for retrieval: {}", e);
                 Vec::new()
             }
         }
