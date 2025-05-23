@@ -434,16 +434,21 @@ async fn handle_attack(
             .unwrap_or_default()
             .as_secs();
             
-        // Cooldown in seconds
-        const ATTACK_COOLDOWN: u64 = 3;
-        
-        // Check if the player is on cooldown
-        if !game_state.can_attack(&attacker_id, now, ATTACK_COOLDOWN) {
+        // Check if the player is on cooldown (using configuration)
+        if !game_state.can_attack(&attacker_id, now) {
+            // Get remaining cooldown time for better error message
+            let remaining_cooldown = match game_state.get_player(&attacker_id) {
+                Some(player) => {
+                    let config = game_state.get_config();
+                    let time_since_last = now.saturating_sub(player.last_attack_time);
+                    config.attack_cooldown_seconds.saturating_sub(time_since_last)
+                },
+                None => 0,
+            };
+            
             // Send an error message if on cooldown
             let cooldown_msg = ServerMessage::Error { 
-                message: format!("Attack on cooldown! Wait {} more seconds.", ATTACK_COOLDOWN - 
-                    (now - game_state.get_player(&attacker_id)
-                        .map_or(0, |p| p.last_attack_time))),
+                message: format!("Attack on cooldown! Wait {} more seconds.", remaining_cooldown),
                 seq_num: next_seq_num(),
             };
             let message = serde_json::to_string(&cooldown_msg)?;
@@ -451,9 +456,10 @@ async fn handle_attack(
             return Ok(());
         }
         
-        // Check if attacker and target are within range
-        const ATTACK_RANGE: f32 = 28.0; // Maximum attack range in world units
+        // Check if attacker and target are within range (using configuration)
+        let attack_range = game_state.get_config().attack_range;
         
+        // Get attacker's position
         let attacker_pos = match game_state.get_player(&attacker_id) {
             Some(player) => player.position,
             None => {
@@ -468,6 +474,7 @@ async fn handle_attack(
             }
         };
         
+        // Get target's position
         let target_pos = match game_state.get_player(&target_id) {
             Some(player) => player.position,
             None => {
@@ -485,10 +492,10 @@ async fn handle_attack(
         // Calculate distance between attacker and target
         let distance = attacker_pos.distance_to(&target_pos);
         
-        if distance > ATTACK_RANGE {
+        if distance > attack_range {
             // Target is out of range
             let error = ServerMessage::Error { 
-                message: format!("Attack failed: Target is out of range ({:.1} > {:.1}).", distance, ATTACK_RANGE),
+                message: format!("Attack failed: Target is out of range ({:.1} > {:.1}).", distance, attack_range),
                 seq_num: next_seq_num(),
             };
             let message = serde_json::to_string(&error)?;
@@ -525,19 +532,20 @@ async fn handle_attack(
             .unwrap_or("Unknown".to_string());
         
         // Apply damage
-        const BASE_DAMAGE: u32 = 10; // Base damage amount
-        const CRIT_CHANCE: f32 = 0.15; // 15% chance for critical hit
-        const CRIT_MULTIPLIER: f32 = 2.0; // Critical hits do 2x damage
+        let config = game_state.get_config();
+        let base_damage = config.base_damage;
+        let crit_chance = config.crit_chance;
+        let crit_multiplier = config.crit_multiplier;
         
         // Calculate if this is a critical hit
         let mut rng = thread_rng();
-        let is_critical = rng.gen::<f32>() < CRIT_CHANCE;
+        let is_critical = rng.gen::<f32>() < crit_chance;
         
         // Calculate final damage
         let damage = if is_critical {
-            (BASE_DAMAGE as f32 * CRIT_MULTIPLIER) as u32
+            (base_damage as f32 * crit_multiplier) as u32
         } else {
-            BASE_DAMAGE
+            base_damage
         };
         
         // Apply damage and check if target was defeated

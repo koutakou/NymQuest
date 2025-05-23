@@ -16,6 +16,8 @@ use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
 use crate::game_protocol::{ClientMessage, ServerMessage, ServerMessageType, ClientMessageType, Direction};
 
+use crate::config::ClientConfig;
+
 /// Initial time to wait for an acknowledgement before first resend attempt
 const INITIAL_ACK_TIMEOUT_MS: u64 = 5000;
 
@@ -46,13 +48,16 @@ pub struct NetworkManager {
     received_server_msgs: HashSet<u64>,
     seq_counter: u64,
     original_messages: HashMap<u64, OriginalMessage>,
+    config: ClientConfig,
 }
 
 impl NetworkManager {
     /// Create a new NetworkManager and connect to the Nym network
-    pub async fn new() -> Result<Self> {
+    pub async fn new(config: &ClientConfig) -> Result<Self> {
         // Read server address and auth key from file
-        let file_content = match fs::read_to_string("server_address.txt").or_else(|_| fs::read_to_string("../client/server_address.txt")) {
+        let file_content = match fs::read_to_string(&config.server_address_file)
+            .or_else(|_| fs::read_to_string("server_address.txt"))
+            .or_else(|_| fs::read_to_string("../client/server_address.txt")) {
             Ok(content) => content.trim().to_string(),
             Err(_) => {
                 return Err(anyhow!("Cannot read server_address.txt. Make sure the server is running and you have access to the address file."));
@@ -99,6 +104,7 @@ impl NetworkManager {
             received_server_msgs: HashSet::new(),
             seq_counter: 1,
             original_messages: HashMap::new(),
+            config: config.clone(),
         })
     }
     

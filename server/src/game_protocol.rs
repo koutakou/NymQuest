@@ -20,9 +20,8 @@ impl Position {
         self.x += move_vector.0 * speed;
         self.y += move_vector.1 * speed;
         
-        // Clamp the position to world boundaries
-        self.x = self.x.clamp(-100.0, 100.0);
-        self.y = self.y.clamp(-100.0, 100.0);
+        // Note: Boundary clamping is now handled by GameConfig::clamp_position
+        // This allows for configurable world boundaries rather than hardcoded values
     }
     
     // Calculate distance to another position
@@ -85,6 +84,8 @@ pub enum ServerMessageType {
     Error,
     HeartbeatRequest,
     Ack,
+    PlayerLeft,
+    PlayerUpdate,
 }
 
 // Message types that the server can send to the client
@@ -108,6 +109,10 @@ pub enum ServerMessage {
     HeartbeatRequest { seq_num: u64 },
     // Acknowledge receipt of a client message
     Ack { client_seq_num: u64, original_type: ClientMessageType },
+    // Player departed
+    PlayerLeft { display_id: String, seq_num: u64 },
+    // Player status update
+    PlayerUpdate { display_id: String, position: Position, health: u32, seq_num: u64 },
 }
 
 // Helper implementation for ServerMessage to get metadata easily
@@ -122,6 +127,8 @@ impl ServerMessage {
             ServerMessage::Error { .. } => ServerMessageType::Error,
             ServerMessage::HeartbeatRequest { .. } => ServerMessageType::HeartbeatRequest,
             ServerMessage::Ack { .. } => ServerMessageType::Ack,
+            ServerMessage::PlayerLeft { .. } => ServerMessageType::PlayerLeft,
+            ServerMessage::PlayerUpdate { .. } => ServerMessageType::PlayerUpdate,
         }
     }
     
@@ -135,6 +142,8 @@ impl ServerMessage {
             ServerMessage::Error { seq_num, .. } => *seq_num,
             ServerMessage::HeartbeatRequest { seq_num, .. } => *seq_num,
             ServerMessage::Ack { client_seq_num, .. } => *client_seq_num,
+            ServerMessage::PlayerLeft { seq_num, .. } => *seq_num,
+            ServerMessage::PlayerUpdate { seq_num, .. } => *seq_num,
         }
     }
 }

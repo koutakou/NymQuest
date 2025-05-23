@@ -3,14 +3,16 @@ mod game_state;
 mod handlers;
 mod utils;
 mod message_auth;
+mod config;
 
 use game_protocol::{Player, Position, ClientMessage, ServerMessage};
 use game_state::GameState;
 use handlers::{handle_client_message, broadcast_game_state, send_heartbeat_requests, cleanup_inactive_players};
 use utils::save_server_address;
 use message_auth::{AuthKey, AuthenticatedMessage};
+use config::GameConfig;
 
-use nym_sdk::mixnet::{MixnetClient, MixnetClientBuilder, StoragePaths, AnonymousSenderTag, MixnetMessageSender};
+use nym_sdk::mixnet::{MixnetClient, MixnetClientBuilder, StoragePaths, AnonymousSenderTag, MixnetMessageSender, Recipient, IncludedSurbs};
 use std::path::PathBuf;
 use futures::StreamExt;
 use std::time::{SystemTime, UNIX_EPOCH, Duration};
@@ -67,6 +69,29 @@ async fn main() -> Result<()> {
     
     info!("=== Nym Quest Server Starting ===");
     
+    // Load game configuration
+    let game_config = match GameConfig::load() {
+        Ok(config) => {
+            info!("Game configuration loaded successfully");
+            config
+        },
+        Err(e) => {
+            error!("Failed to load game configuration: {}", e);
+            return Err(e);
+        }
+    };
+    
+    // Log key configuration values for debugging
+    info!("World boundaries: ({:.1}, {:.1}) to ({:.1}, {:.1})", 
+          game_config.world_min_x, game_config.world_min_y,
+          game_config.world_max_x, game_config.world_max_y);
+    info!("Player limits: {} max players, {} max name length",
+          game_config.max_players, game_config.max_player_name_length);
+    info!("Combat settings: {} damage, {}s cooldown", 
+          game_config.attack_damage, game_config.attack_cooldown_seconds);
+    info!("Heartbeat: {}s interval, {}s timeout",
+          game_config.heartbeat_interval_seconds, game_config.heartbeat_timeout_seconds);
+    
     // Configure Nym client
     let config_dir = PathBuf::from("/tmp/nym_mmorpg_server");
     let storage_paths = StoragePaths::new_from_dir(&config_dir)?;
@@ -102,20 +127,28 @@ async fn main() -> Result<()> {
     
     info!("Server ready - waiting for players to connect");
     
-    // Initialize shared game state
-    let game_state = Arc::new(GameState::new());
+    // Create game state with loaded configuration
+    let game_state = Arc::new(GameState::new_with_config(game_config.clone()));
     
-    // Set up periodic heartbeat tasks
-    let mut heartbeat_interval = interval(Duration::from_secs(game_state::HEARTBEAT_INTERVAL_SECONDS));
-    let mut cleanup_interval = interval(Duration::from_secs(game_state::HEARTBEAT_TIMEOUT_SECONDS / 3)); // Check more frequently than timeout
+    // Spawn heartbeat task without client (simplified for now)
+    let heartbeat_game_state = Arc::clone(&game_state);
+    let heartbeat_interval = game_config.heartbeat_interval_seconds;
     
-    info!(
-        "Heartbeat system initialized - requests every {}s, timeout after {}s", 
-        game_state::HEARTBEAT_INTERVAL_SECONDS,
-        game_state::HEARTBEAT_TIMEOUT_SECONDS
-    );
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(heartbeat_interval));
+        loop {
+            interval.tick().await;
+            
+            // Remove inactive players (without sending heartbeat requests for now)
+            let inactive_players = heartbeat_game_state.get_inactive_players();
+            if !inactive_players.is_empty() {
+                info!("Removing {} inactive players", inactive_players.len());
+                heartbeat_game_state.remove_players_by_ids(&inactive_players);
+            }
+        }
+    });
     
-    // Main event loop with heartbeat management
+    // Main event loop
     loop {
         tokio::select! {
             // Handle incoming messages from clients
@@ -128,31 +161,18 @@ async fn main() -> Result<()> {
                         }
                     }
                     None => {
-                        info!("Client stream ended, shutting down");
+                        error!("Message stream ended unexpectedly");
                         break;
                     }
-                }
-            }
-            
-            // Send periodic heartbeat requests
-            _ = heartbeat_interval.tick() => {
-                if let Err(e) = send_heartbeat_requests(&client, &game_state, &auth_key).await {
-                    error!("Error sending heartbeat requests: {}", e);
-                }
-            }
-            
-            // Cleanup inactive players
-            _ = cleanup_interval.tick() => {
-                if let Err(e) = cleanup_inactive_players(&client, &game_state, &auth_key).await {
-                    error!("Error cleaning up inactive players: {}", e);
                 }
             }
         }
     }
     
     info!("Server shutting down");
-    client.disconnect().await;
     
+    // The client will be dropped naturally when main exits
+    // No need to explicitly disconnect when using shared references
     Ok(())
 }
 

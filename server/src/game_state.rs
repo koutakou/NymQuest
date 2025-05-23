@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::{thread_rng, Rng};
@@ -7,42 +7,78 @@ use tracing::{warn, error, debug, info};
 
 use nym_sdk::mixnet::AnonymousSenderTag;
 use crate::game_protocol::{Player, Position};
+use crate::config::GameConfig;
 
 /// Type alias for a player ID and its associated sender tag
 pub type PlayerTag = (String, AnonymousSenderTag);
 
-/// Configuration constants for heartbeat mechanism
-pub const HEARTBEAT_TIMEOUT_SECONDS: u64 = 30; // Remove players after 30 seconds of inactivity
-pub const HEARTBEAT_INTERVAL_SECONDS: u64 = 10; // Send heartbeat requests every 10 seconds
-
 /// GameState manages the entire game state including players and connections
 pub struct GameState {
     /// Map of player IDs to Player objects
-    players: Mutex<HashMap<String, Player>>,
+    players: RwLock<HashMap<String, Player>>,
     /// List of active connections (player_id, sender_tag)
     connections: Mutex<Vec<PlayerTag>>,
     /// Map of player IDs to their last heartbeat timestamp
     last_heartbeat: Mutex<HashMap<String, u64>>,
+    /// Game configuration
+    config: GameConfig,
 }
 
 impl GameState {
-    /// Create a new empty GameState
+    /// Create a new empty GameState with default configuration
     pub fn new() -> Self {
+        let config = GameConfig::default();
         GameState {
-            players: Mutex::new(HashMap::new()),
+            players: RwLock::new(HashMap::new()),
             connections: Mutex::new(Vec::new()),
             last_heartbeat: Mutex::new(HashMap::new()),
+            config,
         }
+    }
+    
+    /// Create a new GameState with specific configuration
+    pub fn new_with_config(config: GameConfig) -> Self {
+        GameState {
+            players: RwLock::new(HashMap::new()),
+            connections: Mutex::new(Vec::new()),
+            last_heartbeat: Mutex::new(HashMap::new()),
+            config,
+        }
+    }
+    
+    /// Get a reference to the game configuration
+    pub fn get_config(&self) -> &GameConfig {
+        &self.config
     }
 
     /// Add a new player to the game
     pub fn add_player(&self, name: String, sender_tag: AnonymousSenderTag) -> String {
+        // Validate player name length according to configuration
+        if name.len() > self.config.max_player_name_length {
+            warn!("Player name too long: {} characters (max: {})", name.len(), self.config.max_player_name_length);
+            // Truncate the name to fit within limits
+        }
+        
+        // Check player count limit
+        let current_player_count = match self.players.read() {
+            Ok(players) => players.len(),
+            Err(_) => {
+                error!("Failed to access players for count check");
+                return String::new();
+            }
+        };
+        
+        if current_player_count >= self.config.max_players {
+            warn!("Maximum player limit reached: {}/{}", current_player_count, self.config.max_players);
+            return String::new();
+        }
+        
         // Generate a unique ID for the player
         let player_id = Uuid::new_v4().to_string();
         
         // Generate a position that's not occupied by another player
         let available_position = {
-            match self.players.lock() {
+            match self.players.read() {
                 Ok(state) => self.generate_available_position(&state),
                 Err(e) => {
                     warn!("Failed to access players for position generation: {}", e);
@@ -74,7 +110,7 @@ impl GameState {
         
         // Ensure the display ID is unique
         let unique_display_id = {
-            match self.players.lock() {
+            match self.players.read() {
                 Ok(mut state) => {
                     let mut current_id = format!("Player{}", state.len() + 1);
                     let mut attempts = 0;
@@ -99,14 +135,14 @@ impl GameState {
         let player = Player {
             id: player_id.clone(),
             display_id: unique_display_id,
-            name,
+            name: name.chars().take(self.config.max_player_name_length).collect(), // Ensure name is within limits
             position: available_position,
-            health: 100,
-            last_attack_time: now,
+            health: self.config.initial_player_health,
+            last_attack_time: now.saturating_sub(self.config.attack_cooldown_seconds), // Allow immediate first attack
         };
-        
+
         // Add the player to the game state
-        match self.players.lock() {
+        match self.players.write() {
             Ok(mut players) => {
                 players.insert(player_id.clone(), player);
             },
@@ -176,7 +212,7 @@ impl GameState {
             
             // Remove from game state
             if let Some(id) = &player_id_to_remove {
-                match self.players.lock() {
+                match self.players.write() {
                     Ok(mut players) => {
                         players.remove(id);
                     },
@@ -222,7 +258,7 @@ impl GameState {
 
     /// Get a clone of all players
     pub fn get_players(&self) -> HashMap<String, Player> {
-        match self.players.lock() {
+        match self.players.read() {
             Ok(players) => players.clone(),
             Err(e) => {
                 warn!("Failed to access players for retrieval: {}", e);
@@ -233,7 +269,7 @@ impl GameState {
 
     /// Get a specific player by their internal ID
     pub fn get_player(&self, player_id: &str) -> Option<Player> {
-        match self.players.lock() {
+        match self.players.read() {
             Ok(players) => players.get(player_id).cloned(),
             Err(e) => {
                 warn!("Failed to access players for retrieval: {}", e);
@@ -244,7 +280,7 @@ impl GameState {
     
     /// Find a player's internal ID from their display ID
     pub fn get_player_id_by_display_id(&self, display_id: &str) -> Option<String> {
-        match self.players.lock() {
+        match self.players.read() {
             Ok(players) => {
                 for (id, player) in players.iter() {
                     if player.display_id == display_id {
@@ -262,67 +298,91 @@ impl GameState {
 
     /// Update a player's position
     pub fn update_player_position(&self, player_id: &str, new_position: Position) -> bool {
-        let position_tolerance: f32 = 2.0; // Minimum distance between players
+        // Validate position using configuration boundaries
+        let (clamped_x, clamped_y) = self.config.clamp_position(new_position.x, new_position.y);
+        let clamped_position = Position::new(clamped_x, clamped_y);
         
-        // Check if the new position would collide with any other player
-        match self.players.lock() {
-            Ok(state) => {
-                state.iter().all(|(id, other_player)| {
-                    // Skip checking against ourselves
-                    if id == player_id {
-                        return true;
-                    }
-                    
-                    let dx = other_player.position.x - new_position.x;
-                    let dy = other_player.position.y - new_position.y;
-                    let distance_squared = dx * dx + dy * dy;
-                    
-                    // Consider the position available if squared distance > tolerance squared
-                    distance_squared > position_tolerance * position_tolerance
-                })
+        match self.players.write() {
+            Ok(mut players) => {
+                if let Some(player) = players.get_mut(player_id) {
+                    player.position = clamped_position;
+                    debug!("Updated position for player {} to ({:.1}, {:.1})", 
+                           player_id, clamped_position.x, clamped_position.y);
+                    true
+                } else {
+                    debug!("Player {} not found for position update", player_id);
+                    false
+                }
             },
             Err(e) => {
-                warn!("Failed to access players for position update: {}", e);
+                error!("Failed to update player position: {}", e);
                 false
             }
         }
     }
-    
-    /// Apply damage to a player
-    /// 
-    /// If health drops to zero, the player is reset with full health (100 HP) at a random position.
-    /// Returns true if the player was defeated (health reached zero).
+
+    /// Apply damage to a player and return true if they were defeated
     pub fn apply_damage(&self, target_id: &str, damage: u32) -> bool {
-        let mut target_defeated = false;
+        let actual_damage = damage.min(self.config.attack_damage); // Limit damage to configured max
         
-        match self.players.lock() {
-            Ok(mut state) => {
-                if let Some(target) = state.get_mut(target_id) {
-                    if target.health <= damage {
-                        target.health = 0;
-                        target_defeated = true;
-                        
-                        // Reset the defeated player
-                        let mut rng = thread_rng();
-                        target.position.x = rng.gen_range(-100.0..100.0);
-                        target.position.y = rng.gen_range(-100.0..100.0);
-                        target.health = 100;
-                    } else {
-                        target.health -= damage;
-                    }
+        // First, determine if we need a new position by checking if player will be defeated
+        let needs_respawn = match self.players.read() {
+            Ok(players) => {
+                if let Some(player) = players.get(target_id) {
+                    player.health <= actual_damage
+                } else {
+                    return false; // Player doesn't exist
                 }
-            },
+            }
             Err(e) => {
-                warn!("Failed to access players for damage application: {}", e);
+                error!("Failed to check player health: {}", e);
+                return false;
+            }
+        };
+        
+        // Generate new position if needed (while no locks are held)
+        let new_position = if needs_respawn {
+            match self.players.read() {
+                Ok(players) => Some(self.generate_available_position(&players)),
+                Err(e) => {
+                    error!("Failed to generate respawn position: {}", e);
+                    return false;
+                }
+            }
+        } else {
+            None
+        };
+        
+        // Now apply the damage and update position if needed
+        match self.players.write() {
+            Ok(mut players) => {
+                if let Some(player) = players.get_mut(target_id) {
+                    if let Some(respawn_pos) = new_position {
+                        // Player defeated - reset position and health
+                        player.position = respawn_pos;
+                        player.health = self.config.initial_player_health;
+                        info!("Player {} was defeated and respawned at {:?}", target_id, player.position);
+                        true
+                    } else {
+                        player.health -= actual_damage;
+                        info!("Player {} took {} damage, health now: {}", target_id, actual_damage, player.health);
+                        false
+                    }
+                } else {
+                    warn!("Attempted to damage non-existent player: {}", target_id);
+                    false
+                }
+            }
+            Err(e) => {
+                error!("Failed to apply damage: {}", e);
+                false
             }
         }
-        
-        target_defeated
     }
 
     /// Update a player's last attack time
     pub fn update_attack_time(&self, player_id: &str, time: u64) {
-        match self.players.lock() {
+        match self.players.write() {
             Ok(mut state) => {
                 if let Some(player) = state.get_mut(player_id) {
                     player.last_attack_time = time;
@@ -336,18 +396,20 @@ impl GameState {
 
     /// Check if a player can attack (not on cooldown)
     /// 
-    /// Combat system uses a cooldown period (typically 3 seconds) between attacks.
+    /// Combat system uses a cooldown period from configuration between attacks.
     /// Returns true if enough time has passed since the player's last attack.
-    pub fn can_attack(&self, player_id: &str, current_time: u64, cooldown: u64) -> bool {
-        match self.players.lock() {
-            Ok(state) => {
-                if let Some(player) = state.get(player_id) {
-                    return current_time - player.last_attack_time >= cooldown;
+    pub fn can_attack(&self, player_id: &str, current_time: u64) -> bool {
+        match self.players.read() {
+            Ok(players) => {
+                if let Some(player) = players.get(player_id) {
+                    let time_since_last_attack = current_time.saturating_sub(player.last_attack_time);
+                    time_since_last_attack >= self.config.attack_cooldown_seconds
+                } else {
+                    false
                 }
-                false
             },
             Err(e) => {
-                warn!("Failed to access players for attack cooldown check: {}", e);
+                error!("Failed to check attack cooldown: {}", e);
                 false
             }
         }
@@ -394,7 +456,7 @@ impl GameState {
             Ok(last_heartbeats) => {
                 last_heartbeats.iter()
                     .filter_map(|(player_id, &last_heartbeat_time)| {
-                        if now.saturating_sub(last_heartbeat_time) > HEARTBEAT_TIMEOUT_SECONDS {
+                        if now.saturating_sub(last_heartbeat_time) > self.config.heartbeat_timeout_seconds {
                             Some(player_id.clone())
                         } else {
                             None
@@ -450,10 +512,10 @@ impl GameState {
         const MAX_ATTEMPTS: usize = 100;
         
         for _ in 0..MAX_ATTEMPTS {
-            // Generate a random position
+            // Generate a random position within configured world boundaries
             let position = Position {
-                x: rng.gen_range(-100.0..100.0),
-                y: rng.gen_range(-100.0..100.0),
+                x: rng.gen_range(self.config.world_min_x..self.config.world_max_x),
+                y: rng.gen_range(self.config.world_min_y..self.config.world_max_y),
             };
             
             // Check if this position is far enough from all other players
@@ -474,8 +536,8 @@ impl GameState {
         // If we can't find an available position after max attempts, just return a random one
         // This is a fallback that should rarely be needed
         Position {
-            x: rng.gen_range(-100.0..100.0),
-            y: rng.gen_range(-100.0..100.0),
+            x: rng.gen_range(self.config.world_min_x..self.config.world_max_x),
+            y: rng.gen_range(self.config.world_min_y..self.config.world_max_y),
         }
     }
 }

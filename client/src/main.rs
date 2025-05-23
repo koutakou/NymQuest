@@ -5,6 +5,7 @@ mod renderer;
 mod message_auth;
 mod ui_components;
 mod command_completer;
+mod config;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -18,6 +19,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilte
 
 use command_completer::GameHistoryHinter;
 use ui_components::render_help_section;
+use config::ClientConfig;
 
 use game_protocol::{ClientMessage, ServerMessage, Direction, Position};
 use game_state::GameState;
@@ -73,11 +75,14 @@ async fn main() -> anyhow::Result<()> {
     info!("=== NYM MMORPG Client Starting ===");
     println!("{}", "=== NYM MMORPG Client ===".green().bold());
     
+    // Load client configuration
+    let config = ClientConfig::load()?;
+    
     // Initialize the game state
     let game_state: Arc<Mutex<GameState>> = Arc::new(Mutex::new(GameState::new()));
     
     // Initialize network connection
-    let mut network = match NetworkManager::new().await {
+    let mut network = match NetworkManager::new(&config).await {
         Ok(network) => network,
         Err(e) => {
             error!("Error initializing network connection: {}", e);
@@ -102,6 +107,7 @@ async fn main() -> anyhow::Result<()> {
     // Clone necessary values for the input handling task
     let tx_clone = tx.clone();
     let game_state_clone = Arc::clone(&game_state);
+    let config_clone = config.clone();
     
     // Spawn a task to handle user input with command history
     task::spawn(async move {
@@ -205,7 +211,7 @@ async fn main() -> anyhow::Result<()> {
     }
     
     // We'll use a simple event handler approach
-    let result = run_event_loop(&mut network, &game_state, &mut rx, &mut typing_rx).await;
+    let result = run_event_loop(&mut network, &game_state, &mut rx, &mut typing_rx, &config).await;
     
     // This would only be reached if the event loop had a break condition
     // which our implementation doesn't currently have
@@ -223,11 +229,12 @@ async fn main() -> anyhow::Result<()> {
 
 /// Process a command entered by the user
 async fn process_user_command(
-    network: &mut NetworkManager,
-    game_state: &Arc<Mutex<GameState>>, 
-    command: String
+    input: &str, 
+    network: &mut NetworkManager, 
+    game_state: &Arc<Mutex<GameState>>,
+    config: &ClientConfig,
 ) -> anyhow::Result<()> {
-    let command_parts: Vec<&str> = command.split_whitespace().collect();
+    let command_parts: Vec<&str> = input.split_whitespace().collect();
     
     if command_parts.is_empty() {
         return Ok(());
@@ -315,10 +322,9 @@ async fn process_user_command(
                             if let Some(player) = state.players.get_mut(&player_id) {
                                 let mut new_pos = player.position;
                                 
-                                // Use the same mini_map_cell_size as the server (14.0 units)
-                                // This ensures one movement command = one cell on the mini-map
-                                let mini_map_cell_size = 14.0;
-                                new_pos.apply_movement(move_vector, mini_map_cell_size);
+                                // Use the configured movement speed
+                                let movement_speed = config.movement_speed;
+                                new_pos.apply_movement(move_vector, movement_speed);
                                 
                                 clear_screen();
                                 info!("Moving {:?}", direction);
@@ -353,29 +359,29 @@ async fn process_user_command(
         // Direct movement shortcuts - these are more ergonomic than typing "/move <direction>"
         "up" | "u" | "north" | "n" => {
             // Use helper function to handle movement in direction
-            handle_movement_direction(network, game_state, Direction::Up).await?
+            handle_movement_direction(network, game_state, Direction::Up, config).await?
         },
         "down" | "d" | "south" | "s" => {
-            handle_movement_direction(network, game_state, Direction::Down).await?
+            handle_movement_direction(network, game_state, Direction::Down, config).await?
         },
         "left" | "l" | "west" | "w" => {
-            handle_movement_direction(network, game_state, Direction::Left).await?
+            handle_movement_direction(network, game_state, Direction::Left, config).await?
         },
         "right" | "r" | "east" | "e" => {
-            handle_movement_direction(network, game_state, Direction::Right).await?
+            handle_movement_direction(network, game_state, Direction::Right, config).await?
         },
         // Diagonal movement shortcuts
         "ne" | "northeast" => {
-            handle_movement_direction(network, game_state, Direction::UpRight).await?
+            handle_movement_direction(network, game_state, Direction::UpRight, config).await?
         },
         "nw" | "northwest" => {
-            handle_movement_direction(network, game_state, Direction::UpLeft).await?
+            handle_movement_direction(network, game_state, Direction::UpLeft, config).await?
         },
         "se" | "southeast" => {
-            handle_movement_direction(network, game_state, Direction::DownRight).await?
+            handle_movement_direction(network, game_state, Direction::DownRight, config).await?
         },
         "sw" | "southwest" => {
-            handle_movement_direction(network, game_state, Direction::DownLeft).await?
+            handle_movement_direction(network, game_state, Direction::DownLeft, config).await?
         },
         // Attack command
         "attack" | "a" => {
@@ -464,7 +470,8 @@ async fn run_event_loop(
     network: &mut NetworkManager,
     game_state: &Arc<Mutex<GameState>>,
     rx: &mut mpsc::Receiver<String>,
-    typing_rx: &mut mpsc::Receiver<bool>
+    typing_rx: &mut mpsc::Receiver<bool>,
+    config: &ClientConfig,
 ) -> anyhow::Result<()> {
     // Create an interval for checking unacknowledged messages
     let mut check_interval = time::interval(time::Duration::from_millis(1000));
@@ -474,7 +481,7 @@ async fn run_event_loop(
         tokio::select! {
             // Process user commands
             Some(command) = rx.recv() => {
-                if let Err(e) = process_user_command(network, game_state, command).await {
+                if let Err(e) = process_user_command(&command, network, game_state, config).await {
                     error!("Error processing command: {}", e);
                 }
                 // Don't render here as it's done in the input handler now
@@ -518,7 +525,8 @@ async fn run_event_loop(
 async fn handle_movement_direction(
     network: &mut NetworkManager,
     game_state: &Arc<Mutex<GameState>>,
-    direction: Direction
+    direction: Direction,
+    config: &ClientConfig,
 ) -> anyhow::Result<()> {
     // Check if player is registered
     let player_id = {
@@ -557,10 +565,9 @@ async fn handle_movement_direction(
                     if let Some(player) = state.players.get_mut(&player_id) {
                         let mut new_pos = player.position;
                         
-                        // Use the same mini_map_cell_size as the server (14.0 units)
-                        // This ensures one movement command = one cell on the mini-map
-                        let mini_map_cell_size = 14.0;
-                        new_pos.apply_movement(move_vector, mini_map_cell_size);
+                        // Use the configured movement speed
+                        let movement_speed = config.movement_speed;
+                        new_pos.apply_movement(move_vector, movement_speed);
                         
                         clear_screen();
                         info!("Moving {:?}", direction);
