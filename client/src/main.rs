@@ -6,6 +6,7 @@ mod message_auth;
 mod ui_components;
 mod command_completer;
 mod config;
+mod status_monitor;
 
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
@@ -81,8 +82,14 @@ async fn main() -> anyhow::Result<()> {
     // Initialize the game state
     let game_state: Arc<Mutex<GameState>> = Arc::new(Mutex::new(GameState::new()));
     
+    // Get a reference to the status monitor for the network manager
+    let status_monitor = {
+        let gs = game_state.lock().unwrap();
+        Arc::clone(&gs.status_monitor)
+    };
+    
     // Initialize network connection
-    let mut network = match NetworkManager::new(&config).await {
+    let mut network = match NetworkManager::new(&config, status_monitor).await {
         Ok(network) => network,
         Err(e) => {
             error!("Error initializing network connection: {}", e);

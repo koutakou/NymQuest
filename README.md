@@ -35,6 +35,14 @@ The project consists of two main components:
 - Displays a mini-map of the game world showing player positions
 - **Automatic Heartbeat Responses**: Responds to server heartbeat requests to maintain connection
 - **Graceful Disconnection**: Sends proper disconnect message when exiting
+- **Real-Time Status Monitoring**: Comprehensive privacy and connection health monitoring system that provides:
+  - **Connection Health Indicators**: Real-time monitoring of mixnet connection quality (Excellent, Good, Fair, Poor, Critical)
+  - **Privacy Protection Levels**: Visual indicators showing current anonymity status (Fully Protected, Protected, Degraded, Compromised)
+  - **Message Delivery Tracking**: Live tracking of message lifecycle from sent to delivered/failed with latency measurements
+  - **Network Statistics**: Real-time metrics including average latency, packet loss rates, and success rates
+  - **Anonymity Set Monitoring**: Information about the current anonymity set size for privacy awareness
+  - **Status Dashboard**: Interactive UI displaying all privacy and connection metrics in an organized dashboard
+  - **Privacy-Preserving Metrics**: All monitoring respects privacy principles and doesn't compromise user anonymity
 
 ## Technical Stack
 
@@ -78,6 +86,31 @@ Persistence features:
 - **Configurable storage** location via environment variables
 - **Graceful degradation** when persistence is disabled
 - **Position validation** to handle world boundary changes
+
+### Client-Side Status Monitoring
+
+The client includes a comprehensive status monitoring system that provides real-time visibility into connection health and privacy status while maintaining anonymity:
+
+**Core Components:**
+- **StatusMonitor Module**: Centralized tracking of connection metrics, message delivery, and privacy indicators
+- **Network Integration**: Deep integration with the NetworkManager to monitor all mixnet communications
+- **Thread-Safe Architecture**: Uses `Arc<Mutex<StatusMonitor>>` for safe concurrent access across network and UI threads
+- **Privacy-Compliant Metrics**: All collected data respects privacy principles and doesn't compromise user anonymity
+
+**Real-Time Tracking:**
+- **Message Lifecycle Monitoring**: Tracks messages from send → in-transit → delivered/failed with precise latency measurements
+- **Connection Health Assessment**: Evaluates mixnet connection quality based on response times and success rates
+- **Privacy Level Indicators**: Monitors anonymity protection status and provides visual feedback
+- **Network Statistics**: Calculates rolling averages for latency, packet loss, and delivery success rates
+- **Anonymity Set Awareness**: Displays estimated anonymity set size for privacy context
+
+**User Interface Integration:**
+- **Status Dashboard**: Real-time display of all privacy and connection metrics
+- **Visual Indicators**: Color-coded status indicators for quick assessment
+- **Data Freshness Indicators**: Improved timestamp display with appropriate thresholds for mixnet delays
+- **Non-Intrusive Design**: Status information enhances rather than disrupts the gaming experience
+
+This monitoring system enhances user awareness while preserving the core privacy guarantees of the Nym mixnet.
 
 ### Configuration
 

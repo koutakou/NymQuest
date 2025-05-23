@@ -1,7 +1,9 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, Mutex};
 
 use crate::game_protocol::{Player, WorldBoundaries};
+use crate::status_monitor::StatusMonitor;
 
 /// Represents a chat message with sender, content and timestamp
 pub struct ChatMessage {
@@ -22,6 +24,7 @@ pub struct GameState {
     pub max_chat_history: usize,
     /// World boundaries received from server during registration
     pub world_boundaries: Option<WorldBoundaries>,
+    pub status_monitor: Arc<Mutex<StatusMonitor>>,
 }
 
 impl GameState {
@@ -35,6 +38,7 @@ impl GameState {
             chat_history: VecDeque::with_capacity(50),
             max_chat_history: 50,
             world_boundaries: None,
+            status_monitor: Arc::new(Mutex::new(StatusMonitor::new())),
         }
     }
 

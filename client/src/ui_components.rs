@@ -465,12 +465,14 @@ pub fn render_game_state(state: &GameState) {
     
     // Display last update time with more context
     let elapsed = state.last_update.elapsed();
-    let update_status = if elapsed.as_secs() < 2 {
+    let update_status = if elapsed.as_secs() < 5 {
         "DATA IS CURRENT".green().bold()
-    } else if elapsed.as_secs() < 10 {
-        "DATA UPDATED RECENTLY".yellow()
+    } else if elapsed.as_secs() < 30 {
+        "DATA UPDATED RECENTLY".green()
+    } else if elapsed.as_secs() < 60 {
+        "DATA IS SLIGHTLY OUTDATED".yellow()
     } else {
-        "DATA MAY BE OUTDATED".red().bold()
+        "DATA MAY BE OUTDATED (mixnet delays expected)".yellow().dimmed()
     };
     
     println!("{} {} seconds ago", update_status, elapsed.as_secs());
@@ -484,6 +486,9 @@ pub fn render_game_state(state: &GameState) {
             if let Some(player) = state.players.get(id) {
                 // Player stats section
                 render_player_stats(player, true);
+                
+                // Render privacy and connection status dashboard
+                render_status_dashboard(state);
                 
                 // Render enhanced mini-map with player position
                 render_mini_map(state, Some(&player.position));
@@ -526,4 +531,72 @@ pub fn render_game_state(state: &GameState) {
     
     // Command input prompt
     render_input_prompt();
+}
+
+/// Render status monitor dashboard with privacy and connection information
+pub fn render_status_dashboard(state: &GameState) {
+    // Get a lock on the status monitor
+    let monitor = match state.status_monitor.lock() {
+        Ok(monitor) => monitor,
+        Err(_) => {
+            // If lock fails, display an error message
+            draw_box("PRIVACY & CONNECTION STATUS", &vec!["⚠️ Status monitoring temporarily unavailable".to_string()], 80);
+            return;
+        }
+    };
+    
+    let (health_desc, privacy_desc) = monitor.status_description();
+    
+    // Status dashboard content
+    let mut status_content = vec![];
+    
+    // Privacy Status Section
+    status_content.push(format!("{} Privacy Status: {}", 
+                               monitor.privacy_indicator(), 
+                               privacy_desc.cyan().bold()));
+    
+    // Connection Health Section
+    status_content.push(format!("{} Connection Health: {}", 
+                               monitor.health_indicator(), 
+                               health_desc));
+    
+    // Mixnet Information
+    let mixnet_status = if monitor.mixnet_connected {
+        format!("✓ Connected via Nym Mixnet ({} hops)", monitor.network_stats.estimated_hops)
+    } else {
+        "✗ Direct Connection (No Privacy Protection)".to_string()
+    };
+    status_content.push(mixnet_status);
+    
+    // Anonymity Set Information
+    status_content.push(format!("👥 Anonymity Set: {} users", monitor.anonymity_set_size));
+    
+    // Network Statistics
+    if monitor.network_stats.messages_sent > 0 {
+        status_content.push("".to_string()); // Separator
+        status_content.push("📊 Network Statistics:".cyan().bold().to_string());
+        status_content.push(format!("  • Average Latency: {}ms", monitor.network_stats.avg_latency_ms));
+        status_content.push(format!("  • Success Rate: {:.1}%", monitor.network_stats.delivery_success_rate()));
+        status_content.push(format!("  • Packet Loss: {:.1}%", monitor.network_stats.packet_loss_percentage()));
+        
+        let pending = monitor.pending_message_count();
+        if pending > 0 {
+            status_content.push(format!("  • Pending Messages: {}", pending));
+        }
+    }
+    
+    // Recent Activity
+    if let Some(last_comm) = monitor.network_stats.last_successful_communication {
+        let elapsed = last_comm.elapsed().as_secs();
+        let last_activity = if elapsed < 60 {
+            format!("{}s ago", elapsed)
+        } else if elapsed < 3600 {
+            format!("{}m ago", elapsed / 60)
+        } else {
+            format!("{}h ago", elapsed / 3600)
+        };
+        status_content.push(format!("🕐 Last Activity: {}", last_activity));
+    }
+    
+    draw_box("PRIVACY & CONNECTION STATUS", &status_content, 80);
 }
