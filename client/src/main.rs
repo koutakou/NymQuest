@@ -149,7 +149,16 @@ async fn main() -> anyhow::Result<()> {
     });
     
     // Render initial state
-    render_game_state(&game_state.lock().unwrap());
+    match game_state.lock() {
+        Ok(state) => {
+            render_game_state(&state);
+        },
+        Err(e) => {
+            println!("{} Failed to render initial game state: {}", 
+                     "Warning:".yellow().bold(), e);
+            println!("{}", "Continuing without initial render...".yellow());
+        }
+    }
     
     // We'll use a simple event handler approach
     let result = run_event_loop(&mut network, &game_state, &mut rx, &mut typing_rx).await;
@@ -187,8 +196,14 @@ async fn process_user_command(
         // Registration command
         "register" | "r" => {
             // Check if the player is already registered
-            if game_state.lock().unwrap().is_registered() {
-                println!("{}", "You are already registered. Please disconnect first before registering again.".yellow());
+            if let Ok(state) = game_state.lock() {
+                if state.is_registered() {
+                    println!("{}", "You are already registered. Please disconnect first before registering again.".yellow());
+                    return Ok(());
+                }
+            } else {
+                println!("{} Failed to access game state for registration check: {}", 
+                         "Warning:".yellow().bold(), "Please restart the client.");
                 return Ok(());
             }
             
@@ -214,8 +229,13 @@ async fn process_user_command(
         "move" | "m" | "go" => {
             // Check if player is registered
             let player_id = {
-                let state = game_state.lock().unwrap();
-                state.get_player_id().map(|id| id.to_string())
+                if let Ok(state) = game_state.lock() {
+                    state.get_player_id().map(|id| id.to_string())
+                } else {
+                    println!("{} Failed to access game state for player ID: {}", 
+                             "Warning:".yellow().bold(), "Please restart the client.");
+                    return Ok(());
+                }
             };
             
             if player_id.is_none() {
@@ -245,30 +265,43 @@ async fn process_user_command(
             
             // Create a block to limit the scope of the mutex lock
             {
-                let mut state = game_state.lock().unwrap();
-                
-                // First, check if we have a player ID and clone it to avoid borrow issues
-                if let Some(player_id) = state.player_id.clone() {
-                    // Now get a mutable reference to the player
-                    if let Some(player) = state.players.get_mut(&player_id) {
-                        // Calculate and display predicted new position
-                        let mut predicted_pos = player.position;
-                        
-                        // Use the same mini_map_cell_size as the server (14.0 units)
-                        // This ensures one movement command = one cell on the mini-map
-                        let mini_map_cell_size = 14.0;
-                        predicted_pos.apply_movement(move_vector, mini_map_cell_size);
-                        
-                        clear_screen();
-                        println!("Moving {:?}", direction);
-                        println!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
-                        println!("Predicted position: ({:.1}, {:.1})", predicted_pos.x, predicted_pos.y);
-                        
-                        // Update position locally for responsive feedback
-                        // This will be corrected when we receive the next GameState update
-                        player.position = predicted_pos;
+                let predicted_pos = match game_state.lock() {
+                    Ok(mut state) => {
+                        // Check if we have a player ID and clone it to avoid borrow issues
+                        if let Some(player_id) = state.player_id.clone() {
+                            // Now get a mutable reference to the player
+                            if let Some(player) = state.players.get_mut(&player_id) {
+                                let mut new_pos = player.position;
+                                
+                                // Use the same mini_map_cell_size as the server (14.0 units)
+                                // This ensures one movement command = one cell on the mini-map
+                                let mini_map_cell_size = 14.0;
+                                new_pos.apply_movement(move_vector, mini_map_cell_size);
+                                
+                                clear_screen();
+                                println!("Moving {:?}", direction);
+                                println!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
+                                println!("Predicted position: ({:.1}, {:.1})", new_pos.x, new_pos.y);
+                                
+                                // Update position locally for responsive feedback
+                                // This will be corrected when we receive the next GameState update
+                                player.position = new_pos;
+                                Some(new_pos)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    },
+                    Err(e) => {
+                        // Handle poisoned mutex gracefully
+                        println!("{} Failed to access game state for movement prediction: {}", 
+                                 "Warning:".yellow().bold(), e);
+                        println!("{}", "Movement will proceed without local prediction.".yellow());
+                        None
                     }
-                }
+                };
             }
             
             // Message already sent above, no need to send it again
@@ -306,8 +339,14 @@ async fn process_user_command(
         // Attack command
         "attack" | "a" => {
             // Check if player is registered
-            if !game_state.lock().unwrap().is_registered() {
-                println!("You need to register first before you can attack.");
+            if let Ok(state) = game_state.lock() {
+                if !state.is_registered() {
+                    println!("You need to register first before you can attack.");
+                    return Ok(());
+                }
+            } else {
+                println!("{} Failed to access game state for registration check: {}", 
+                         "Warning:".yellow().bold(), "Please restart the client.");
                 return Ok(());
             }
             
@@ -328,8 +367,14 @@ async fn process_user_command(
         // Chat command
         "chat" | "c" | "say" => {
             // Check if player is registered
-            if !game_state.lock().unwrap().is_registered() {
-                println!("You need to register first before you can chat.");
+            if let Ok(state) = game_state.lock() {
+                if !state.is_registered() {
+                    println!("You need to register first before you can chat.");
+                    return Ok(());
+                }
+            } else {
+                println!("{} Failed to access game state for registration check: {}", 
+                         "Warning:".yellow().bold(), "Please restart the client.");
                 return Ok(());
             }
             
@@ -350,13 +395,18 @@ async fn process_user_command(
         // Exit commands
         "exit" | "quit" | "q" => {
             // Send disconnect message if registered
-            if game_state.lock().unwrap().is_registered() {
-                let disconnect_msg = ClientMessage::Disconnect { seq_num: 0 };
-                if let Err(e) = network.send_message(disconnect_msg).await {
-                    println!("Failed to send disconnect message: {}", e);
-                } else {
-                    println!("Disconnect message sent to server");
+            if let Ok(state) = game_state.lock() {
+                if state.is_registered() {
+                    let disconnect_msg = ClientMessage::Disconnect { seq_num: 0 };
+                    if let Err(e) = network.send_message(disconnect_msg).await {
+                        println!("Failed to send disconnect message: {}", e);
+                    } else {
+                        println!("Disconnect message sent to server");
+                    }
                 }
+            } else {
+                println!("{} Failed to access game state for registration check: {}", 
+                         "Warning:".yellow().bold(), "Please restart the client.");
             }
             
             // Perform proper network disconnection
@@ -371,6 +421,9 @@ async fn process_user_command(
         "help" | "h" | "?" => {
             if let Ok(state) = game_state.lock() {
                 render_help_section();
+            } else {
+                println!("{} Failed to access game state for help: {}", 
+                         "Warning:".yellow().bold(), "Please restart the client.");
             }
             return Ok(());
         },
@@ -415,7 +468,7 @@ async fn run_event_loop(
                     }
                 } else {
                     // Handle poisoned mutex
-                    println!("{}", "Error accessing game state. Please restart the client.".red().bold());
+                    println!("{} {}", "Error accessing game state:".red().bold(), "Please restart the client.");
                 }
             },
             // Check for typing state updates
@@ -424,7 +477,7 @@ async fn run_event_loop(
                     state.set_typing(is_typing);
                 } else {
                     // Mutex poisoned, continue gracefully
-                    println!("{}", "Error updating typing state".yellow());
+                    println!("{} {}", "Warning:".yellow().bold(), "Failed to update typing state.");
                 }
             },
             // Periodically check for messages that need to be resent
@@ -446,8 +499,13 @@ async fn handle_movement_direction(
 ) -> anyhow::Result<()> {
     // Check if player is registered
     let player_id = {
-        let state = game_state.lock().unwrap();
-        state.get_player_id().map(|id| id.to_string())
+        if let Ok(state) = game_state.lock() {
+            state.get_player_id().map(|id| id.to_string())
+        } else {
+            println!("{} Failed to access game state for player ID: {}", 
+                     "Warning:".yellow().bold(), "Please restart the client.");
+            return Ok(());
+        }
     };
     
     if player_id.is_none() {
@@ -469,30 +527,43 @@ async fn handle_movement_direction(
 
     // Create a block to limit the scope of the mutex lock
     {
-        let mut state = game_state.lock().unwrap();
-        
-        // First, check if we have a player ID and clone it to avoid borrow issues
-        if let Some(player_id) = state.player_id.clone() {
-            // Now get a mutable reference to the player
-            if let Some(player) = state.players.get_mut(&player_id) {
-                // Calculate and display predicted new position
-                let mut predicted_pos = player.position;
-                
-                // Use the same mini_map_cell_size as the server (14.0 units)
-                // This ensures one movement command = one cell on the mini-map
-                let mini_map_cell_size = 14.0;
-                predicted_pos.apply_movement(move_vector, mini_map_cell_size);
-                
-                clear_screen();
-                println!("Moving {:?}", direction);
-                println!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
-                println!("Predicted position: ({:.1}, {:.1})", predicted_pos.x, predicted_pos.y);
-                
-                // Update position locally for responsive feedback
-                // This will be corrected when we receive the next GameState update
-                player.position = predicted_pos;
+        let predicted_pos = match game_state.lock() {
+            Ok(mut state) => {
+                // Check if we have a player ID and clone it to avoid borrow issues
+                if let Some(player_id) = state.player_id.clone() {
+                    // Now get a mutable reference to the player
+                    if let Some(player) = state.players.get_mut(&player_id) {
+                        let mut new_pos = player.position;
+                        
+                        // Use the same mini_map_cell_size as the server (14.0 units)
+                        // This ensures one movement command = one cell on the mini-map
+                        let mini_map_cell_size = 14.0;
+                        new_pos.apply_movement(move_vector, mini_map_cell_size);
+                        
+                        clear_screen();
+                        println!("Moving {:?}", direction);
+                        println!("Current position: ({:.1}, {:.1})", player.position.x, player.position.y);
+                        println!("Predicted position: ({:.1}, {:.1})", new_pos.x, new_pos.y);
+                        
+                        // Update position locally for responsive feedback
+                        // This will be corrected when we receive the next GameState update
+                        player.position = new_pos;
+                        Some(new_pos)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            },
+            Err(e) => {
+                // Handle poisoned mutex gracefully
+                println!("{} Failed to access game state for movement prediction: {}", 
+                         "Warning:".yellow().bold(), e);
+                println!("{}", "Movement will proceed without local prediction.".yellow());
+                None
             }
-        }
+        };
     }
     
     Ok(())

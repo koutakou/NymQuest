@@ -34,8 +34,14 @@ impl GameState {
         
         // Generate a position that's not occupied by another player
         let available_position = {
-            let state = self.players.lock().unwrap();
-            self.generate_available_position(&state)
+            match self.players.lock() {
+                Ok(state) => self.generate_available_position(&state),
+                Err(e) => {
+                    println!("Warning: Failed to access players for position generation: {}", e);
+                    // Return a default position if mutex is poisoned
+                    Position::new(0.0, 0.0)
+                }
+            }
         };
         
         // Get current time for initializing attack cooldown
@@ -60,19 +66,25 @@ impl GameState {
         
         // Ensure the display ID is unique
         let unique_display_id = {
-            let mut state = self.players.lock().unwrap();
-            let mut current_id = display_id;
-            let mut attempts = 0;
-            
-            // Check if this display ID is already in use
-            while state.values().any(|p| p.display_id == current_id) && attempts < 10 {
-                // If so, add a random number to the end
-                let suffix = thread_rng().gen_range(100..999);
-                current_id = format!("{}{}", current_id, suffix);
-                attempts += 1;
+            match self.players.lock() {
+                Ok(mut state) => {
+                    let mut current_id = format!("Player{}", state.len() + 1);
+                    let mut attempts = 0;
+                    
+                    // Ensure the display ID is unique
+                    while state.values().any(|p| p.display_id == current_id) && attempts < 100 {
+                        attempts += 1;
+                        current_id = format!("Player{}", state.len() + attempts);
+                    }
+                    
+                    current_id
+                },
+                Err(e) => {
+                    println!("Warning: Failed to access players for display ID generation: {}", e);
+                    // Fallback to a UUID-based display ID if mutex is poisoned
+                    format!("Player_{}", Uuid::new_v4().simple().to_string()[..8].to_uppercase())
+                }
             }
-            
-            current_id
         };
             
         // Create a new player with the available position
@@ -86,10 +98,25 @@ impl GameState {
         };
         
         // Add the player to the game state
-        self.players.lock().unwrap().insert(player_id.clone(), player);
+        match self.players.lock() {
+            Ok(mut players) => {
+                players.insert(player_id.clone(), player);
+            },
+            Err(e) => {
+                println!("Error: Failed to add player to game state: {}", e);
+                return player_id; // Return the ID even if we couldn't add the player
+            }
+        }
         
         // Store this active connection
-        self.connections.lock().unwrap().push((player_id.clone(), sender_tag));
+        match self.connections.lock() {
+            Ok(mut connections) => {
+                connections.push((player_id.clone(), sender_tag));
+            },
+            Err(e) => {
+                println!("Error: Failed to store connection: {}", e);
+            }
+        }
         
         player_id
     }
@@ -101,12 +128,18 @@ impl GameState {
         
         // Find the player's ID and index in the connections list
         {
-            let connections = self.connections.lock().unwrap();
-            for (i, (id, conn_tag)) in connections.iter().enumerate() {
-                if conn_tag.to_string() == tag.to_string() {
-                    player_id_to_remove = Some(id.clone());
-                    connection_index = Some(i);
-                    break;
+            match self.connections.lock() {
+                Ok(connections) => {
+                    for (i, (id, conn_tag)) in connections.iter().enumerate() {
+                        if conn_tag.to_string() == tag.to_string() {
+                            player_id_to_remove = Some(id.clone());
+                            connection_index = Some(i);
+                            break;
+                        }
+                    }
+                },
+                Err(e) => {
+                    println!("Warning: Failed to access connections for player removal: {}", e);
                 }
             }
         }
@@ -114,11 +147,25 @@ impl GameState {
         // Remove the player if found
         if let Some(index) = connection_index {
             // Remove from active connections
-            self.connections.lock().unwrap().remove(index);
+            match self.connections.lock() {
+                Ok(mut connections) => {
+                    connections.remove(index);
+                },
+                Err(e) => {
+                    println!("Error: Failed to remove connection: {}", e);
+                }
+            }
             
             // Remove from game state
             if let Some(id) = &player_id_to_remove {
-                self.players.lock().unwrap().remove(id);
+                match self.players.lock() {
+                    Ok(mut players) => {
+                        players.remove(id);
+                    },
+                    Err(e) => {
+                        println!("Error: Failed to remove player from game state: {}", e);
+                    }
+                }
             }
         }
         
@@ -127,36 +174,60 @@ impl GameState {
 
     /// Get a player ID from a sender tag
     pub fn get_player_id(&self, tag: &AnonymousSenderTag) -> Option<String> {
-        let connections = self.connections.lock().unwrap();
-        for (id, conn_tag) in connections.iter() {
-            if conn_tag.to_string() == tag.to_string() {
-                return Some(id.clone());
+        match self.connections.lock() {
+            Ok(connections) => {
+                for (id, conn_tag) in connections.iter() {
+                    if conn_tag.to_string() == tag.to_string() {
+                        return Some(id.clone());
+                    }
+                }
+                None
+            },
+            Err(e) => {
+                println!("Warning: Failed to access connections for player ID retrieval: {}", e);
+                None
             }
         }
-        None
     }
 
     /// Get a clone of all players
     pub fn get_players(&self) -> HashMap<String, Player> {
-        self.players.lock().unwrap().clone()
+        match self.players.lock() {
+            Ok(players) => players.clone(),
+            Err(e) => {
+                println!("Warning: Failed to access players for retrieval: {}", e);
+                HashMap::new()
+            }
+        }
     }
 
     /// Get a specific player by their internal ID
     pub fn get_player(&self, player_id: &str) -> Option<Player> {
-        self.players.lock().unwrap().get(player_id).cloned()
+        match self.players.lock() {
+            Ok(players) => players.get(player_id).cloned(),
+            Err(e) => {
+                println!("Warning: Failed to access players for retrieval: {}", e);
+                None
+            }
+        }
     }
     
     /// Find a player's internal ID from their display ID
     pub fn get_player_id_by_display_id(&self, display_id: &str) -> Option<String> {
-        let players = self.players.lock().unwrap();
-        
-        for (id, player) in players.iter() {
-            if player.display_id == display_id {
-                return Some(id.clone());
+        match self.players.lock() {
+            Ok(players) => {
+                for (id, player) in players.iter() {
+                    if player.display_id == display_id {
+                        return Some(id.clone());
+                    }
+                }
+                None
+            },
+            Err(e) => {
+                println!("Warning: Failed to access players for display ID lookup: {}", e);
+                None
             }
         }
-        
-        None
     }
 
     /// Update a player's position
@@ -164,33 +235,27 @@ impl GameState {
         let position_tolerance: f32 = 2.0; // Minimum distance between players
         
         // Check if the new position would collide with any other player
-        let position_is_available = {
-            let state = self.players.lock().unwrap();
-            state.iter().all(|(id, other_player)| {
-                // Skip checking against ourselves
-                if id == player_id {
-                    return true;
-                }
-                
-                let dx = other_player.position.x - new_position.x;
-                let dy = other_player.position.y - new_position.y;
-                let distance_squared = dx * dx + dy * dy;
-                
-                // Consider the position available if squared distance > tolerance squared
-                distance_squared > position_tolerance * position_tolerance
-            })
-        };
-        
-        // Only update if position is available
-        if position_is_available {
-            let mut state = self.players.lock().unwrap();
-            if let Some(player) = state.get_mut(player_id) {
-                player.position = new_position;
-                return true;
+        match self.players.lock() {
+            Ok(state) => {
+                state.iter().all(|(id, other_player)| {
+                    // Skip checking against ourselves
+                    if id == player_id {
+                        return true;
+                    }
+                    
+                    let dx = other_player.position.x - new_position.x;
+                    let dy = other_player.position.y - new_position.y;
+                    let distance_squared = dx * dx + dy * dy;
+                    
+                    // Consider the position available if squared distance > tolerance squared
+                    distance_squared > position_tolerance * position_tolerance
+                })
+            },
+            Err(e) => {
+                println!("Warning: Failed to access players for position update: {}", e);
+                false
             }
         }
-        
-        false
     }
     
     /// Apply damage to a player
@@ -200,19 +265,25 @@ impl GameState {
     pub fn apply_damage(&self, target_id: &str, damage: u32) -> bool {
         let mut target_defeated = false;
         
-        let mut state = self.players.lock().unwrap();
-        if let Some(target) = state.get_mut(target_id) {
-            if target.health <= damage {
-                target.health = 0;
-                target_defeated = true;
-                
-                // Reset the defeated player
-                let mut rng = thread_rng();
-                target.position.x = rng.gen_range(-100.0..100.0);
-                target.position.y = rng.gen_range(-100.0..100.0);
-                target.health = 100;
-            } else {
-                target.health -= damage;
+        match self.players.lock() {
+            Ok(mut state) => {
+                if let Some(target) = state.get_mut(target_id) {
+                    if target.health <= damage {
+                        target.health = 0;
+                        target_defeated = true;
+                        
+                        // Reset the defeated player
+                        let mut rng = thread_rng();
+                        target.position.x = rng.gen_range(-100.0..100.0);
+                        target.position.y = rng.gen_range(-100.0..100.0);
+                        target.health = 100;
+                    } else {
+                        target.health -= damage;
+                    }
+                }
+            },
+            Err(e) => {
+                println!("Warning: Failed to access players for damage application: {}", e);
             }
         }
         
@@ -221,9 +292,15 @@ impl GameState {
 
     /// Update a player's last attack time
     pub fn update_attack_time(&self, player_id: &str, time: u64) {
-        let mut state = self.players.lock().unwrap();
-        if let Some(player) = state.get_mut(player_id) {
-            player.last_attack_time = time;
+        match self.players.lock() {
+            Ok(mut state) => {
+                if let Some(player) = state.get_mut(player_id) {
+                    player.last_attack_time = time;
+                }
+            },
+            Err(e) => {
+                println!("Warning: Failed to access players for attack time update: {}", e);
+            }
         }
     }
 
@@ -232,16 +309,29 @@ impl GameState {
     /// Combat system uses a cooldown period (typically 3 seconds) between attacks.
     /// Returns true if enough time has passed since the player's last attack.
     pub fn can_attack(&self, player_id: &str, current_time: u64, cooldown: u64) -> bool {
-        let state = self.players.lock().unwrap();
-        if let Some(player) = state.get(player_id) {
-            return current_time - player.last_attack_time >= cooldown;
+        match self.players.lock() {
+            Ok(state) => {
+                if let Some(player) = state.get(player_id) {
+                    return current_time - player.last_attack_time >= cooldown;
+                }
+                false
+            },
+            Err(e) => {
+                println!("Warning: Failed to access players for attack cooldown check: {}", e);
+                false
+            }
         }
-        false
     }
 
     /// Get all active connections
     pub fn get_connections(&self) -> Vec<PlayerTag> {
-        self.connections.lock().unwrap().clone()
+        match self.connections.lock() {
+            Ok(connections) => connections.clone(),
+            Err(e) => {
+                println!("Warning: Failed to access connections for retrieval: {}", e);
+                Vec::new()
+            }
+        }
     }
 
     /// Function to generate a random position that is not already occupied by another player

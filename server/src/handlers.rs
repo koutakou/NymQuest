@@ -113,16 +113,23 @@ lazy_static::lazy_static! {
 // Check if we've seen this message before (replay protection)
 fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
     let tag_str = tag.to_string();
-    let mut protection = REPLAY_PROTECTION.lock().unwrap();
-    
-    // Get or create the replay protection window for this client
-    let window = protection.entry(tag_str).or_insert_with(|| {
-        // Window size of 64 means we track the last 64 sequence numbers
-        ReplayProtectionWindow::new(64)
-    });
-    
-    // Check and update the window
-    window.process(seq_num)
+    match REPLAY_PROTECTION.lock() {
+        Ok(mut protection) => {
+            // Get or create the replay protection window for this client
+            let window = protection.entry(tag_str).or_insert_with(|| {
+                // Window size of 64 means we track the last 64 sequence numbers
+                ReplayProtectionWindow::new(64)
+            });
+            
+            // Check and update the window
+            window.process(seq_num)
+        },
+        Err(e) => {
+            println!("Warning: Failed to access replay protection data: {}", e);
+            // In case of mutex poisoning, err on the side of caution and allow the message
+            false
+        }
+    }
 }
 
 /// Send an acknowledgment for a client message
