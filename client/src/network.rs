@@ -9,7 +9,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio::time;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, error, debug, trace};
 
 // Import message authentication module
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
@@ -34,17 +34,17 @@ pub enum OriginalMessage {
     Attack { target_display_id: String },
     Chat { message: String },
     Disconnect,
+    Heartbeat,
 }
 
 pub struct NetworkManager {
     client: Option<MixnetClient>,
     server_address: String,
     auth_key: AuthKey,
-    next_seq_num: u64,
     pending_acks: HashMap<u64, (Instant, ClientMessageType)>,
-    received_server_msgs: HashSet<u64>,
     retry_count: HashMap<u64, usize>,
-    // Store original message content for resending
+    received_server_msgs: HashSet<u64>,
+    seq_counter: u64,
     original_messages: HashMap<u64, OriginalMessage>,
 }
 
@@ -94,61 +94,63 @@ impl NetworkManager {
             client: Some(client),
             server_address,
             auth_key,
-            next_seq_num: 1,
             pending_acks: HashMap::new(),
-            received_server_msgs: HashSet::new(),
             retry_count: HashMap::new(),
+            received_server_msgs: HashSet::new(),
+            seq_counter: 1,
             original_messages: HashMap::new(),
         })
     }
     
     /// Send a message to the server with automatic sequencing and retry mechanism
     pub async fn send_message(&mut self, message: ClientMessage) -> Result<()> {
-        if let Some(client) = &mut self.client {
-            // For Ack messages, use the existing sequence number but still authenticate them
-            if matches!(message, ClientMessage::Ack { .. }) {
-                // Create an authenticated message with HMAC
-                let authenticated_ack = AuthenticatedMessage::new(message, &self.auth_key)?;
-                let message_str = serde_json::to_string(&authenticated_ack)?;
-                
-                // Create recipient from server address
+        // Handle acknowledgment messages without adding sequence numbers
+        if let ClientMessage::Ack { .. } = message {
+            if let Some(client) = &mut self.client {
+                let authenticated_message = AuthenticatedMessage::new(message, &self.auth_key)?;
+                let message_str = serde_json::to_string(&authenticated_message)?;
+                debug!("Sending acknowledgment message");
                 let recipient = Recipient::from_str(&self.server_address)
                     .map_err(|e| anyhow!("Invalid server address: {}", e))?;
-                
                 client.send_message(recipient, message_str.into_bytes(), IncludedSurbs::default()).await?;
-                return Ok(());
             }
-            
+            return Ok(());
+        }
+
+        // Get the next sequence number before borrowing client
+        let seq_num = self.next_seq_num();
+        
+        if let Some(client) = &mut self.client {
             // For all other message types, attach sequence number
             let message_with_seq = match message {
                 ClientMessage::Register { name, .. } => {
-                    ClientMessage::Register { name, seq_num: self.next_seq_num }
+                    ClientMessage::Register { name, seq_num }
                 },
                 ClientMessage::Move { direction, .. } => {
-                    ClientMessage::Move { direction, seq_num: self.next_seq_num }
+                    ClientMessage::Move { direction, seq_num }
                 },
                 ClientMessage::Attack { target_display_id, .. } => {
-                    ClientMessage::Attack { target_display_id, seq_num: self.next_seq_num }
+                    ClientMessage::Attack { target_display_id, seq_num }
                 },
                 ClientMessage::Chat { message, .. } => {
-                    ClientMessage::Chat { message, seq_num: self.next_seq_num }
+                    ClientMessage::Chat { message, seq_num }
                 },
                 ClientMessage::Disconnect { .. } => {
-                    ClientMessage::Disconnect { seq_num: self.next_seq_num }
+                    ClientMessage::Disconnect { seq_num }
                 },
-                // This should never be reached due to the check above
-                ClientMessage::Ack { .. } => unreachable!(),
+                ClientMessage::Heartbeat { .. } => {
+                    ClientMessage::Heartbeat { seq_num }
+                },
+                ClientMessage::Ack { .. } => unreachable!(), // Handled above
             };
             
             // Store the message type and timestamp for acknowledgement tracking
-            let current_seq = self.next_seq_num;
             self.pending_acks.insert(
-                current_seq,
+                seq_num,
                 (Instant::now(), message_with_seq.get_type())
             );
             
-            // Initialize retry count
-            self.retry_count.insert(current_seq, 0);
+            self.retry_count.insert(seq_num, 0);
             
             // Store the original message content for potential resends
             let original = match &message_with_seq {
@@ -167,14 +169,14 @@ impl NetworkManager {
                 ClientMessage::Disconnect { .. } => {
                     OriginalMessage::Disconnect
                 },
-                _ => unreachable!(),
+                ClientMessage::Heartbeat { .. } => {
+                    OriginalMessage::Heartbeat
+                },
+                ClientMessage::Ack { .. } => unreachable!(), // Handled above
             };
             
             // Store the original message
-            self.original_messages.insert(current_seq, original);
-            
-            // Increment sequence number for next message
-            self.next_seq_num += 1;
+            self.original_messages.insert(seq_num, original);
             
             // Authenticate and serialize the message
             let authenticated_message = AuthenticatedMessage::new(message_with_seq, &self.auth_key)?;
@@ -184,12 +186,11 @@ impl NetworkManager {
             let recipient = Recipient::from_str(&self.server_address)
                 .map_err(|e| anyhow!("Invalid server address: {}", e))?;
             
+            debug!("Sending message with seq_num: {}", seq_num);
             client.send_message(recipient, message_str.into_bytes(), IncludedSurbs::default()).await?;
-            
-            Ok(())
-        } else {
-            Err(anyhow!("Client is not connected"))
         }
+        
+        Ok(())
     }
     
     /// Check for messages that need to be resent due to missing acknowledgements
@@ -250,7 +251,7 @@ impl NetworkManager {
                         }
                     },
                     OriginalMessage::Move { direction } => {
-                        debug!("Resending Move with original direction: {:?}", direction);
+                        debug!("Resending Move");
                         ClientMessage::Move { 
                             direction: *direction, 
                             seq_num 
@@ -273,6 +274,10 @@ impl NetworkManager {
                     OriginalMessage::Disconnect => {
                         debug!("Resending Disconnect");
                         ClientMessage::Disconnect { seq_num }
+                    },
+                    OriginalMessage::Heartbeat => {
+                        debug!("Resending Heartbeat");
+                        ClientMessage::Heartbeat { seq_num }
                     },
                 }
             } else {
@@ -310,6 +315,9 @@ impl NetworkManager {
                     ClientMessageType::Ack => {
                         // We don't resend acks
                         continue;
+                    },
+                    ClientMessageType::Heartbeat => {
+                        ClientMessage::Heartbeat { seq_num }
                     },
                 }
             };
@@ -444,6 +452,8 @@ impl NetworkManager {
         // Send the acknowledgement (fire and forget)
         if let Err(e) = self.send_message(ack_message).await {
             error!("Failed to send acknowledgement: {}", e);
+        } else {
+            trace!("Sent acknowledgement for seq_num: {}", seq_num);
         }
         
         // Record that we've received this message
@@ -457,28 +467,72 @@ impl NetworkManager {
             self.received_server_msgs.retain(|&num| num >= threshold);
         }
         
+        match server_message {
+            ServerMessage::GameState { ref players, seq_num } => {
+                trace!("Received game state update with {} players", players.len());
+                
+                // Send acknowledgment
+                let ack = ClientMessage::Ack { 
+                    server_seq_num: seq_num,
+                    original_type: ServerMessageType::GameState,
+                };
+                if let Err(e) = self.send_message(ack).await {
+                    error!("Failed to send ack for game state: {}", e);
+                }
+                
+                // Update local game state
+                // *self.game_state.lock().unwrap() = players;
+                info!("Game state updated - {} players online", players.len());
+            },
+            ServerMessage::HeartbeatRequest { seq_num } => {
+                trace!("Received heartbeat request with seq_num: {}", seq_num);
+                
+                // Send acknowledgment first
+                let ack = ClientMessage::Ack { 
+                    server_seq_num: seq_num,
+                    original_type: ServerMessageType::HeartbeatRequest,
+                };
+                if let Err(e) = self.send_message(ack).await {
+                    error!("Failed to send ack for heartbeat request: {}", e);
+                }
+                
+                // Send heartbeat response
+                let heartbeat = ClientMessage::Heartbeat { 
+                    seq_num: self.next_seq_num(),
+                };
+                if let Err(e) = self.send_message(heartbeat).await {
+                    error!("Failed to send heartbeat response: {}", e);
+                } else {
+                    trace!("Sent heartbeat response");
+                }
+            },
+            _ => {}
+        }
+        
         Some(server_message)
     }
     
     /// Disconnect from the Nym network
     pub async fn disconnect(&mut self) -> Result<()> {
-        if let Some(client) = self.client.take() {
+        if self.client.is_some() {
             info!("Disconnecting from Nym network...");
             
             // Send a disconnect message before actually disconnecting
-            // If we still have a client reference
-            if let Some(ref mut client_ref) = self.client {
-                let disconnect_msg = ClientMessage::Disconnect { seq_num: self.next_seq_num };
-                if let Err(e) = self.send_message(disconnect_msg).await {
-                    error!("Failed to send disconnect message: {}", e);
-                } else {
-                    // Wait a short time for the message to be sent before disconnecting
-                    time::sleep(Duration::from_millis(300)).await;
-                }
+            let disconnect_msg = ClientMessage::Disconnect { seq_num: self.next_seq_num() };
+            if let Err(e) = self.send_message(disconnect_msg).await {
+                error!("Failed to send disconnect message: {}", e);
+            } else {
+                info!("Disconnect message sent to server");
+                // Wait a short time for the message to be sent before disconnecting
+                time::sleep(Duration::from_millis(500)).await;
             }
             
-            // Properly await the disconnection to ensure it completes
-            client.disconnect().await;
+            // Now take and disconnect the client
+            if let Some(client) = self.client.take() {
+                // Properly await the disconnection to ensure it completes
+                client.disconnect().await;
+            }
+            
             info!("Disconnected.");
             Ok(())
         } else {
@@ -536,5 +590,12 @@ impl NetworkManager {
     /// Check if the client is connected
     pub fn is_connected(&self) -> bool {
         self.client.is_some()
+    }
+    
+    /// Get the next sequence number and increment the counter
+    fn next_seq_num(&mut self) -> u64 {
+        let seq = self.seq_counter;
+        self.seq_counter = seq + 1;
+        seq
     }
 }

@@ -57,6 +57,8 @@ pub enum ClientMessage {
     Chat { message: String, seq_num: u64 },
     // Message to leave the game
     Disconnect { seq_num: u64 },
+    // Heartbeat message to keep the connection alive
+    Heartbeat { seq_num: u64 },
     // Acknowledge receipt of a server message
     Ack { server_seq_num: u64, original_type: ServerMessageType },
 }
@@ -69,6 +71,7 @@ pub enum ServerMessageType {
     Event,
     ChatMessage,
     Error,
+    HeartbeatRequest,
     Ack,
 }
 
@@ -89,6 +92,8 @@ pub enum ServerMessage {
     ChatMessage { sender_name: String, message: String, seq_num: u64 },
     // Error message
     Error { message: String, seq_num: u64 },
+    // Heartbeat request
+    HeartbeatRequest { seq_num: u64 },
     // Acknowledge receipt of a client message
     Ack { client_seq_num: u64, original_type: ClientMessageType },
 }
@@ -101,6 +106,7 @@ pub enum ClientMessageType {
     Attack,
     Chat,
     Disconnect,
+    Heartbeat,
     Ack,
 }
 
@@ -113,6 +119,7 @@ impl ServerMessage {
             ServerMessage::Event { .. } => ServerMessageType::Event,
             ServerMessage::ChatMessage { .. } => ServerMessageType::ChatMessage,
             ServerMessage::Error { .. } => ServerMessageType::Error,
+            ServerMessage::HeartbeatRequest { .. } => ServerMessageType::HeartbeatRequest,
             ServerMessage::Ack { .. } => ServerMessageType::Ack,
         }
     }
@@ -125,6 +132,7 @@ impl ServerMessage {
             ServerMessage::Event { seq_num, .. } => *seq_num,
             ServerMessage::ChatMessage { seq_num, .. } => *seq_num,
             ServerMessage::Error { seq_num, .. } => *seq_num,
+            ServerMessage::HeartbeatRequest { seq_num, .. } => *seq_num,
             ServerMessage::Ack { client_seq_num, .. } => *client_seq_num,
         }
     }
@@ -139,6 +147,7 @@ impl ClientMessage {
             ClientMessage::Attack { .. } => ClientMessageType::Attack,
             ClientMessage::Chat { .. } => ClientMessageType::Chat,
             ClientMessage::Disconnect { .. } => ClientMessageType::Disconnect,
+            ClientMessage::Heartbeat { .. } => ClientMessageType::Heartbeat,
             ClientMessage::Ack { .. } => ClientMessageType::Ack,
         }
     }
@@ -151,6 +160,7 @@ impl ClientMessage {
             ClientMessage::Attack { seq_num, .. } => *seq_num,
             ClientMessage::Chat { seq_num, .. } => *seq_num,
             ClientMessage::Disconnect { seq_num, .. } => *seq_num,
+            ClientMessage::Heartbeat { seq_num, .. } => *seq_num,
             ClientMessage::Ack { server_seq_num, .. } => *server_seq_num,
         }
     }

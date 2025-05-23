@@ -10,6 +10,8 @@ This project showcases how the Nym network can be used to build privacy-preservi
 - **Enhanced Terminal Interface**: Lightweight client with an improved UI featuring bordered sections, intuitive health bars, distance visualization, and color-coded player statuses for a more engaging gaming experience
 - **Real-Time Multiplayer**: Move around a 2D world, chat with other players, and engage in simple combat
 - **Anonymous Identity**: Players can create characters without revealing their real identity
+- **Heartbeat System**: Automatic detection and removal of inactive players to maintain game state consistency
+- **Graceful Disconnection**: Proper cleanup when players leave the game
 
 ## Architecture
 
@@ -20,12 +22,16 @@ The project consists of two main components:
 - Processes player commands (movement, attacks, chat)
 - Broadcasts game state updates to all connected players
 - Handles player registration and disconnection
+- **Heartbeat Monitoring**: Periodically checks for inactive players and removes them automatically
+- **Connection Management**: Tracks player activity and ensures game state consistency
 
 ### Client
 - Connects to the server through the Nym mixnet
 - Renders the game state in a terminal interface with colors
 - Processes user input for movement and actions
 - Displays a mini-map of the game world showing player positions
+- **Automatic Heartbeat Responses**: Responds to server heartbeat requests to maintain connection
+- **Graceful Disconnection**: Sends proper disconnect message when exiting
 
 ## Technical Stack
 
@@ -105,6 +111,7 @@ NymQuest demonstrates several key privacy benefits:
 7. **Secure Authentication Verification**: Improved error handling for authentication failures with privacy-preserving error messages
 8. **Protection Against Replay Attacks**: Messages are verified with sequence numbers and authentication tags to prevent replay attacks
 9. **Session Integrity Protection**: Prevents identity conflicts by requiring clients to disconnect before registering again, maintaining the integrity of user sessions
+10. **Heartbeat System**: Automatic detection of inactive players preserves privacy by preventing stale player data from remaining visible
 
 ## Combat System
 
@@ -116,6 +123,17 @@ NymQuest features a simple but engaging combat system:
 - **Damage**: Base attack deals 10 damage points
 - **Critical Hits**: 15% chance to land a critical hit doing double damage (20 points)
 - **Respawn**: Defeated players respawn with full health at a random position
+
+## Connection Management & Heartbeat System
+
+NymQuest implements a robust connection management system to ensure game state consistency:
+
+- **Heartbeat Monitoring**: Server periodically sends heartbeat requests to all connected players
+- **Automatic Response**: Clients automatically respond to heartbeat requests to maintain their connection
+- **Inactive Player Detection**: Players who don't respond to heartbeat requests within the timeout period are automatically removed
+- **Graceful Disconnection**: When players exit using `/quit`, `/exit`, or `/q`, a proper disconnect message is sent to the server
+- **Immediate Cleanup**: Disconnected or inactive players are immediately removed from the game state and other players are notified
+- **Privacy Preservation**: The heartbeat system maintains anonymity while ensuring accurate player presence information
 
 ## Future Roadmap
 
@@ -134,5 +152,3 @@ Client 1
 
 Client 2
 <img width="1022" alt="image" src="https://github.com/user-attachments/assets/ae1ce486-3695-4fe2-8957-ec00f1b60dc4" />
-
-

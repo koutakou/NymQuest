@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::{thread_rng, Rng};
-use tracing::{warn, error, debug};
+use tracing::{warn, error, debug, info};
 
 use nym_sdk::mixnet::AnonymousSenderTag;
 use crate::game_protocol::{Player, Position};
@@ -11,12 +11,18 @@ use crate::game_protocol::{Player, Position};
 /// Type alias for a player ID and its associated sender tag
 pub type PlayerTag = (String, AnonymousSenderTag);
 
+/// Configuration constants for heartbeat mechanism
+pub const HEARTBEAT_TIMEOUT_SECONDS: u64 = 30; // Remove players after 30 seconds of inactivity
+pub const HEARTBEAT_INTERVAL_SECONDS: u64 = 10; // Send heartbeat requests every 10 seconds
+
 /// GameState manages the entire game state including players and connections
 pub struct GameState {
     /// Map of player IDs to Player objects
     players: Mutex<HashMap<String, Player>>,
     /// List of active connections (player_id, sender_tag)
     connections: Mutex<Vec<PlayerTag>>,
+    /// Map of player IDs to their last heartbeat timestamp
+    last_heartbeat: Mutex<HashMap<String, u64>>,
 }
 
 impl GameState {
@@ -25,6 +31,7 @@ impl GameState {
         GameState {
             players: Mutex::new(HashMap::new()),
             connections: Mutex::new(Vec::new()),
+            last_heartbeat: Mutex::new(HashMap::new()),
         }
     }
 
@@ -119,6 +126,16 @@ impl GameState {
             }
         }
         
+        // Initialize last heartbeat timestamp
+        match self.last_heartbeat.lock() {
+            Ok(mut last_heartbeats) => {
+                last_heartbeats.insert(player_id.clone(), now);
+            },
+            Err(e) => {
+                error!("Failed to initialize last heartbeat timestamp: {}", e);
+            }
+        }
+        
         player_id
     }
 
@@ -165,6 +182,18 @@ impl GameState {
                     },
                     Err(e) => {
                         error!("Failed to remove player from game state: {}", e);
+                    }
+                }
+            }
+            
+            // Remove from last heartbeat timestamps
+            if let Some(id) = &player_id_to_remove {
+                match self.last_heartbeat.lock() {
+                    Ok(mut last_heartbeats) => {
+                        last_heartbeats.remove(id);
+                    },
+                    Err(e) => {
+                        error!("Failed to remove last heartbeat timestamp: {}", e);
                     }
                 }
             }
@@ -331,6 +360,83 @@ impl GameState {
             Err(e) => {
                 warn!("Failed to access connections for retrieval: {}", e);
                 Vec::new()
+            }
+        }
+    }
+
+    /// Update the last heartbeat timestamp for a player
+    pub fn update_heartbeat(&self, player_id: &str) {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+            
+        match self.last_heartbeat.lock() {
+            Ok(mut last_heartbeats) => {
+                last_heartbeats.insert(player_id.to_string(), now);
+                debug!("Updated heartbeat for player {}", player_id);
+            },
+            Err(e) => {
+                error!("Failed to update heartbeat for player {}: {}", player_id, e);
+            }
+        }
+    }
+
+    /// Get inactive players that haven't sent a heartbeat within the timeout period
+    /// Returns a list of player IDs that should be removed
+    pub fn get_inactive_players(&self) -> Vec<String> {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+            
+        match self.last_heartbeat.lock() {
+            Ok(last_heartbeats) => {
+                last_heartbeats.iter()
+                    .filter_map(|(player_id, &last_heartbeat_time)| {
+                        if now.saturating_sub(last_heartbeat_time) > HEARTBEAT_TIMEOUT_SECONDS {
+                            Some(player_id.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect()
+            },
+            Err(e) => {
+                error!("Failed to access last heartbeat timestamps: {}", e);
+                Vec::new()
+            }
+        }
+    }
+
+    /// Remove multiple players by their IDs (used for cleanup of inactive players)
+    pub fn remove_players_by_ids(&self, player_ids: &[String]) -> Vec<String> {
+        let mut removed_players = Vec::new();
+        
+        for player_id in player_ids {
+            // First find the sender tag for this player
+            if let Some(sender_tag) = self.get_sender_tag_by_player_id(player_id) {
+                if let Some(removed_id) = self.remove_player(&sender_tag) {
+                    removed_players.push(removed_id);
+                    info!("Removed inactive player: {}", player_id);
+                }
+            }
+        }
+        
+        removed_players
+    }
+
+    /// Helper method to get sender tag by player ID
+    fn get_sender_tag_by_player_id(&self, player_id: &str) -> Option<AnonymousSenderTag> {
+        match self.connections.lock() {
+            Ok(connections) => {
+                connections.iter()
+                    .find(|(id, _)| id == player_id)
+                    .map(|(_, tag)| tag.clone())
+            },
+            Err(e) => {
+                error!("Failed to access connections to find sender tag: {}", e);
+                None
             }
         }
     }

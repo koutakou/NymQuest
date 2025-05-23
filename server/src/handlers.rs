@@ -133,17 +133,18 @@ fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
     }
 }
 
-/// Send an acknowledgment for a client message
+/// Send an acknowledgment message back to the client
 async fn send_ack(
     client: &MixnetClient,
     sender_tag: &AnonymousSenderTag,
-    client_message: &ClientMessage,
+    seq_num: u64,
+    msg_type: ClientMessageType,
     auth_key: &AuthKey
 ) -> Result<()> {
     // Create acknowledgment
     let ack = ServerMessage::Ack {
-        client_seq_num: client_message.get_seq_num(),
-        original_type: client_message.get_type(),
+        client_seq_num: seq_num,
+        original_type: msg_type,
     };
     
     // Create an authenticated acknowledgment message
@@ -233,7 +234,7 @@ pub async fn handle_client_message(
     }
     
     // Send acknowledgment first for all non-ack messages
-    send_ack(client, &sender_tag, &message, auth_key).await?;
+    send_ack(client, &sender_tag, seq_num, message.get_type(), auth_key).await?;
     
     // Process the message based on its type
     match message {
@@ -249,8 +250,25 @@ pub async fn handle_client_message(
         ClientMessage::Chat { message, .. } => {
             handle_chat(client, game_state, message, sender_tag, auth_key).await
         },
-        ClientMessage::Disconnect { .. } => {
-            handle_disconnect(client, game_state, sender_tag, auth_key).await
+        ClientMessage::Disconnect { seq_num } => {
+            debug!("Processing disconnect message with seq_num: {}", seq_num);
+            
+            // Send acknowledgment first
+            send_ack(client, &sender_tag, seq_num, ClientMessageType::Disconnect, auth_key).await?;
+            
+            // Handle the disconnection
+            handle_disconnect(client, game_state, sender_tag, auth_key).await?;
+            Ok(())
+        },
+        ClientMessage::Heartbeat { seq_num } => {
+            debug!("Processing heartbeat message with seq_num: {}", seq_num);
+            
+            // Send acknowledgment first
+            send_ack(client, &sender_tag, seq_num, ClientMessageType::Heartbeat, auth_key).await?;
+            
+            // Update the heartbeat timestamp
+            handle_heartbeat(client, game_state, sender_tag, auth_key).await?;
+            Ok(())
         },
         ClientMessage::Ack { .. } => {
             // Already handled above
@@ -647,6 +665,88 @@ async fn handle_disconnect(
         info!("Player {} disconnected", player_id);
         
         // Broadcast the updated game state to all remaining players
+        broadcast_game_state(client, game_state, None, auth_key).await?;
+    }
+    
+    Ok(())
+}
+
+/// Handle heartbeat messages
+async fn handle_heartbeat(
+    client: &MixnetClient,
+    game_state: &Arc<GameState>,
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey
+) -> Result<()> {
+    // Find the player ID from sender tag
+    if let Some(player_id) = game_state.get_player_id(&sender_tag) {
+        // Update the heartbeat timestamp for this player
+        game_state.update_heartbeat(&player_id);
+        
+        debug!("Heartbeat received from player {}", player_id);
+    } else {
+        debug!("Received heartbeat from unregistered player");
+    }
+    
+    Ok(())
+}
+
+/// Send heartbeat request to all connected players
+pub async fn send_heartbeat_requests(
+    client: &MixnetClient,
+    game_state: &Arc<GameState>,
+    auth_key: &AuthKey
+) -> Result<()> {
+    let connections = game_state.get_connections();
+    
+    if connections.is_empty() {
+        return Ok(());
+    }
+    
+    let heartbeat_request = ServerMessage::HeartbeatRequest {
+        seq_num: next_seq_num(),
+    };
+    
+    let authenticated_request = AuthenticatedMessage::new(heartbeat_request, auth_key)?;
+    let serialized = serde_json::to_string(&authenticated_request)?;
+    
+    debug!("Sending heartbeat requests to {} players", connections.len());
+    
+    for (player_id, tag) in connections {
+        match client.send_reply(tag, serialized.clone()).await {
+            Ok(_) => {
+                trace!("Heartbeat request sent to player {}", player_id);
+            },
+            Err(e) => {
+                warn!("Failed to send heartbeat request to player {}: {}", player_id, e);
+            }
+        }
+    }
+    
+    Ok(())
+}
+
+/// Check for inactive players and remove them from the game
+pub async fn cleanup_inactive_players(
+    client: &MixnetClient,
+    game_state: &Arc<GameState>,
+    auth_key: &AuthKey
+) -> Result<()> {
+    let inactive_players = game_state.get_inactive_players();
+    
+    if inactive_players.is_empty() {
+        return Ok(());
+    }
+    
+    info!("Found {} inactive players to remove", inactive_players.len());
+    
+    // Remove the inactive players
+    let removed_players = game_state.remove_players_by_ids(&inactive_players);
+    
+    if !removed_players.is_empty() {
+        info!("Removed {} inactive players", removed_players.len());
+        
+        // Broadcast updated game state to remaining players
         broadcast_game_state(client, game_state, None, auth_key).await?;
     }
     

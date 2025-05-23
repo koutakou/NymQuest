@@ -433,21 +433,7 @@ async fn process_user_command(
         },
         // Exit commands
         "exit" | "quit" | "q" => {
-            // Send disconnect message if registered
-            if let Ok(state) = game_state.lock() {
-                if state.is_registered() {
-                    let disconnect_msg = ClientMessage::Disconnect { seq_num: 0 };
-                    if let Err(e) = network.send_message(disconnect_msg).await {
-                        error!("Failed to send disconnect message: {}", e);
-                    } else {
-                        info!("Disconnect message sent to server");
-                    }
-                }
-            } else {
-                error!("Failed to access game state for registration check. Please restart the client.");
-            }
-            
-            // Perform proper network disconnection
+            // Perform proper network disconnection which will send the disconnect message
             if let Err(e) = network.disconnect().await {
                 error!("Error during disconnection: {}", e);
             }
@@ -663,6 +649,11 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
         ServerMessage::Ack { client_seq_num: _, original_type: _ } => {
             // Acknowledgments are handled in the NetworkManager
             // We don't need to do anything here
+            false
+        },
+        ServerMessage::HeartbeatRequest { seq_num: _ } => {
+            // Heartbeat requests are handled in the NetworkManager
+            // We don't need to do anything here in the main loop
             false
         }
     };
