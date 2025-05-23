@@ -433,12 +433,13 @@ pub fn render_nearby_players(state: &GameState) {
 pub fn render_help_section() {
     let commands = vec![
         "Available Commands:".cyan().bold().to_string(),
-        "/register <name>, /r <name> - Register with the given name".to_string(),
+        "/register <n>, /r <n> - Register with the given name".to_string(),
         "/move <direction>, /m <direction>, /go <direction> - Move in a direction".to_string(),
         "Direction shortcuts: /up (or /u, /n), /down (or /d, /s), /left (or /l, /w), /right (or /r, /e)".to_string(),
         "Diagonal movement: /ne, /nw, /se, /sw - Move diagonally".to_string(),
         "/attack <player_id>, /a <player_id> - Attack player with the given display ID".to_string(),
         "/chat <message>, /c <message>, /say <message> - Send a chat message to all players".to_string(),
+        "/emote <type>, /em <type> - Perform an emote action (wave, bow, laugh, dance, salute, shrug, cheer, clap)".to_string(),
         "/help, /h, /? - Show this help information".to_string(),
         "/quit, /exit, /q - Exit the game".to_string(),
     ];

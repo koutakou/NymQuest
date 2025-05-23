@@ -14,7 +14,7 @@ use tracing::{info, warn, error, debug, trace};
 // Import message authentication module
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
-use crate::game_protocol::{ClientMessage, ServerMessage, ServerMessageType, ClientMessageType, Direction};
+use crate::game_protocol::{ClientMessage, ServerMessage, ServerMessageType, ClientMessageType, Direction, EmoteType};
 
 use crate::config::ClientConfig;
 
@@ -35,6 +35,7 @@ pub enum OriginalMessage {
     Move { direction: Direction },
     Attack { target_display_id: String },
     Chat { message: String },
+    Emote { emote_type: EmoteType },
     Disconnect,
     Heartbeat,
 }
@@ -141,6 +142,9 @@ impl NetworkManager {
                 ClientMessage::Chat { message, .. } => {
                     ClientMessage::Chat { message, seq_num }
                 },
+                ClientMessage::Emote { emote_type, .. } => {
+                    ClientMessage::Emote { emote_type, seq_num }
+                },
                 ClientMessage::Disconnect { .. } => {
                     ClientMessage::Disconnect { seq_num }
                 },
@@ -171,6 +175,9 @@ impl NetworkManager {
                 },
                 ClientMessage::Chat { message, .. } => {
                     OriginalMessage::Chat { message: message.clone() }
+                },
+                ClientMessage::Emote { emote_type, .. } => {
+                    OriginalMessage::Emote { emote_type: *emote_type }
                 },
                 ClientMessage::Disconnect { .. } => {
                     OriginalMessage::Disconnect
@@ -285,6 +292,13 @@ impl NetworkManager {
                         debug!("Resending Heartbeat");
                         ClientMessage::Heartbeat { seq_num }
                     },
+                    OriginalMessage::Emote { emote_type } => {
+                        debug!("Resending Emote");
+                        ClientMessage::Emote {
+                            emote_type: *emote_type,
+                            seq_num
+                        }
+                    },
                 }
             } else {
                 // Fallback if original message is somehow not available
@@ -317,6 +331,13 @@ impl NetworkManager {
                     },
                     ClientMessageType::Disconnect => {
                         ClientMessage::Disconnect { seq_num }
+                    },
+                    ClientMessageType::Emote => {
+                        // Default to a wave emote for resends
+                        ClientMessage::Emote {
+                            emote_type: EmoteType::Wave,
+                            seq_num
+                        }
                     },
                     ClientMessageType::Ack => {
                         // We don't resend acks

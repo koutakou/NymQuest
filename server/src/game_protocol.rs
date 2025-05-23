@@ -50,6 +50,7 @@ pub enum ClientMessageType {
     Move,
     Attack,
     Chat,
+    Emote,
     Disconnect,
     Heartbeat,
     Ack,
@@ -66,6 +67,8 @@ pub enum ClientMessage {
     Attack { target_display_id: String, seq_num: u64 },
     // Message to send chat to all players
     Chat { message: String, seq_num: u64 },
+    // Message to perform an emote
+    Emote { emote_type: EmoteType, seq_num: u64 },
     // Message to leave the game
     Disconnect { seq_num: u64 },
     // Heartbeat message to keep the connection alive
@@ -162,6 +165,7 @@ impl ClientMessage {
             ClientMessage::Move { .. } => ClientMessageType::Move,
             ClientMessage::Attack { .. } => ClientMessageType::Attack,
             ClientMessage::Chat { .. } => ClientMessageType::Chat,
+            ClientMessage::Emote { .. } => ClientMessageType::Emote,
             ClientMessage::Disconnect { .. } => ClientMessageType::Disconnect,
             ClientMessage::Heartbeat { .. } => ClientMessageType::Heartbeat,
             ClientMessage::Ack { .. } => ClientMessageType::Ack,
@@ -175,6 +179,7 @@ impl ClientMessage {
             ClientMessage::Move { seq_num, .. } => *seq_num,
             ClientMessage::Attack { seq_num, .. } => *seq_num,
             ClientMessage::Chat { seq_num, .. } => *seq_num,
+            ClientMessage::Emote { seq_num, .. } => *seq_num,
             ClientMessage::Disconnect { seq_num, .. } => *seq_num,
             ClientMessage::Heartbeat { seq_num, .. } => *seq_num,
             ClientMessage::Ack { server_seq_num, .. } => *server_seq_num,
@@ -267,6 +272,64 @@ impl WorldBoundaries {
             max_x: config.world_max_x,
             min_y: config.world_min_y,
             max_y: config.world_max_y,
+        }
+    }
+}
+
+// Types of emotes that players can perform
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+pub enum EmoteType {
+    Wave,
+    Bow,
+    Laugh,
+    Dance,
+    Salute,
+    Shrug,
+    Cheer,
+    Clap,
+}
+
+impl EmoteType {
+    // Get a display string for the emote
+    pub fn display_text(&self) -> &'static str {
+        match self {
+            EmoteType::Wave => "waves hello",
+            EmoteType::Bow => "bows respectfully",
+            EmoteType::Laugh => "laughs heartily",
+            EmoteType::Dance => "performs a dance",
+            EmoteType::Salute => "salutes firmly",
+            EmoteType::Shrug => "shrugs shoulders",
+            EmoteType::Cheer => "cheers enthusiastically",
+            EmoteType::Clap => "claps hands",
+        }
+    }
+    
+    // Get a visual representation of the emote for display
+    pub fn display_icon(&self) -> &'static str {
+        match self {
+            EmoteType::Wave => "👋",
+            EmoteType::Bow => "🙇",
+            EmoteType::Laugh => "😂",
+            EmoteType::Dance => "💃",
+            EmoteType::Salute => "🫡",
+            EmoteType::Shrug => "🤷",
+            EmoteType::Cheer => "🎉",
+            EmoteType::Clap => "👏",
+        }
+    }
+    
+    // Parse emote from string
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s.to_lowercase().as_str() {
+            "wave" | "hello" | "hi" => Some(EmoteType::Wave),
+            "bow" => Some(EmoteType::Bow),
+            "laugh" | "lol" | "haha" => Some(EmoteType::Laugh),
+            "dance" => Some(EmoteType::Dance),
+            "salute" => Some(EmoteType::Salute),
+            "shrug" => Some(EmoteType::Shrug),
+            "cheer" => Some(EmoteType::Cheer),
+            "clap" | "applaud" => Some(EmoteType::Clap),
+            _ => None,
         }
     }
 }

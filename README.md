@@ -8,8 +8,9 @@ This project showcases how the Nym network can be used to build privacy-preservi
 
 - **Private Communications**: All game data is transmitted through the Nym mixnet, preventing network observers from linking players to their actions
 - **Enhanced Terminal Interface**: Lightweight client with an improved UI featuring bordered sections, intuitive health bars, distance visualization, and color-coded player statuses for a more engaging gaming experience
-- **Real-Time Multiplayer**: Move around a 2D world, chat with other players, and engage in simple combat
+- **Real-Time Multiplayer**: Move around a 2D world, chat with other players, use emotes for non-verbal communication, and engage in simple combat
 - **Anonymous Identity**: Players can create characters without revealing their real identity
+- **Emote System**: Express yourself with visual emotes that enhance social interaction while maintaining privacy
 - **Heartbeat System**: Automatic detection and removal of inactive players to maintain game state consistency
 - **Graceful Disconnection**: Proper cleanup when players leave the game
 
@@ -94,6 +95,7 @@ The project consists of two main components:
    - Direct movement: `/up` (or `/u`, `/n`), `/down` (or `/d`, `/s`), `/left` (or `/l`, `/w`), `/right` (or `/r`, `/e`)
    - Diagonal movement: `/ne`, `/nw`, `/se`, `/sw`
    - Chat: `/chat Hello everyone!` or `/c Hello everyone!` or `/say Hello everyone!`
+   - Emotes: `/emote wave` or `/em dance` (options: wave, bow, laugh, dance, salute, shrug, cheer, clap)
    - Attack: `/attack player_display_id` or `/a player_display_id` (use the ID in [brackets], not the player name)
    - Help: `/help` or `/h` or `/?`
    - Disconnect: `/quit` or `/exit` or `/q`

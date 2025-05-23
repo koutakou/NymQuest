@@ -445,6 +445,37 @@ async fn process_user_command(
             network.send_message(chat_msg).await?;
             info!("Chat message sent...");
         },
+        // Emote command
+        "emote" | "em" => {
+            // Check if player is registered
+            if let Ok(state) = game_state.lock() {
+                if !state.is_registered() {
+                    info!("You need to register first before you can use emotes.");
+                    return Ok(());
+                }
+            } else {
+                error!("Failed to access game state for registration check. Please restart the client.");
+                return Ok(());
+            }
+            
+            if command_parts.len() < 2 {
+                info!("Usage: emote <type>\nAvailable emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap");
+                return Ok(());
+            }
+            
+            let emote_name = command_parts[1].to_lowercase();
+            if let Some(emote_type) = game_protocol::EmoteType::from_str(&emote_name) {
+                let emote_msg = ClientMessage::Emote { 
+                    emote_type,
+                    seq_num: 0  // Will be set by NetworkManager
+                };
+                
+                network.send_message(emote_msg).await?;
+                info!("Emote '{}' sent...", emote_name);
+            } else {
+                info!("Invalid emote type! Available emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap");
+            }
+        },
         // Exit commands
         "exit" | "quit" | "q" => {
             // Perform proper network disconnection which will send the disconnect message

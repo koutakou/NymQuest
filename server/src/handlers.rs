@@ -9,7 +9,7 @@ use tracing::{info, warn, error, debug, trace};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
-use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType, WorldBoundaries};
+use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType, WorldBoundaries, EmoteType};
 use crate::game_state::GameState;
 use crate::config::GameConfig;
 
@@ -270,6 +270,9 @@ pub async fn handle_client_message(
         },
         ClientMessage::Chat { message, .. } => {
             handle_chat(client, game_state, message, sender_tag, auth_key).await
+        },
+        ClientMessage::Emote { emote_type, .. } => {
+            handle_emote(client, game_state, emote_type, sender_tag, auth_key).await
         },
         ClientMessage::Disconnect { seq_num } => {
             debug!("Processing disconnect message with seq_num: {}", seq_num);
@@ -611,6 +614,80 @@ async fn handle_attack(
         
         // Broadcast the updated game state to all players
         broadcast_game_state(client, game_state, None, auth_key).await?;
+    }
+    
+    Ok(())
+}
+
+/// Handle emote messages
+async fn handle_emote(
+    client: &MixnetClient,
+    game_state: &Arc<GameState>,
+    emote_type: EmoteType,
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey
+) -> Result<()> {
+    // Find the player ID from sender tag
+    if let Some(sender_id) = game_state.get_player_id(&sender_tag) {
+        // Get the player's name
+        if let Some(player) = game_state.get_player(&sender_id) {
+            let sender_name = player.name.clone();
+            
+            // Create the emote message to broadcast to other players
+            let emote_msg = format!("{} {}", emote_type.display_icon(), format!("{} {}", sender_name, emote_type.display_text()));
+            
+            // Create a chat-like message with the emote
+            let chat_msg = ServerMessage::ChatMessage {
+                sender_name: "Emote".to_string(), // Special sender name for emotes
+                message: emote_msg,
+                seq_num: next_seq_num(),
+            };
+            
+            // Create an authenticated chat message
+            let authenticated_chat = AuthenticatedMessage::new(chat_msg, auth_key)?;
+            let serialized = serde_json::to_string(&authenticated_chat)?;
+            
+            // Create confirmation message for the sender
+            let confirm_msg = ServerMessage::Event {
+                message: format!("You {}", emote_type.display_text()),
+                seq_num: next_seq_num(),
+            };
+            
+            // Create an authenticated confirmation message
+            let authenticated_confirm = AuthenticatedMessage::new(confirm_msg, auth_key)?;
+            let confirm_serialized = serde_json::to_string(&authenticated_confirm)?;
+            
+            // Send confirmation to the original sender
+            if let Err(e) = client.send_reply(sender_tag.clone(), confirm_serialized).await {
+                error!("Failed to send emote confirmation to sender {}: {}", sender_id, e);
+            } else {
+                debug!("Emote confirmation sent to sender {}", sender_id);
+            }
+            
+            // Get a copy of all active connections
+            let connections = game_state.get_connections();
+            debug!("Broadcasting emote to {} players", connections.len());
+            
+            // Prepare exclude tag as bytes for more reliable comparison
+            let exclude_bytes = sender_tag.to_string().into_bytes();
+            
+            // Broadcast emote to all other players
+            for (player_id, tag) in connections {
+                // Skip sending to the original sender by comparing the tag bytes
+                if tag.to_string().into_bytes() != exclude_bytes {
+                    match client.send_reply(tag.clone(), serialized.clone()).await {
+                        Ok(_) => {
+                            trace!("Emote message sent to player {}", player_id);
+                        },
+                        Err(e) => {
+                            error!("Failed to send emote message to player {}: {}", player_id, e);
+                        }
+                    }
+                }
+            }
+            
+            info!("Emote from {}: {}", sender_name, emote_type.display_text());
+        }
     }
     
     Ok(())
