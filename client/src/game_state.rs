@@ -1,7 +1,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use crate::game_protocol::Player;
+use crate::game_protocol::{Player, WorldBoundaries};
 
 /// Represents a chat message with sender, content and timestamp
 pub struct ChatMessage {
@@ -20,6 +20,8 @@ pub struct GameState {
     pub chat_history: VecDeque<ChatMessage>,
     /// Maximum number of chat messages to store in history
     pub max_chat_history: usize,
+    /// World boundaries received from server during registration
+    pub world_boundaries: Option<WorldBoundaries>,
 }
 
 impl GameState {
@@ -32,6 +34,7 @@ impl GameState {
             last_update: Instant::now(),
             chat_history: VecDeque::with_capacity(50),
             max_chat_history: 50,
+            world_boundaries: None,
         }
     }
 
@@ -102,5 +105,15 @@ impl GameState {
         let start_idx = if count >= history_len { 0 } else { history_len - count };
         
         self.chat_history.iter().skip(start_idx).collect()
+    }
+
+    /// Set world boundaries received from server
+    pub fn set_world_boundaries(&mut self, boundaries: WorldBoundaries) {
+        self.world_boundaries = Some(boundaries);
+    }
+    
+    /// Get world boundaries if available
+    pub fn get_world_boundaries(&self) -> Option<&WorldBoundaries> {
+        self.world_boundaries.as_ref()
     }
 }

@@ -9,8 +9,9 @@ use tracing::{info, warn, error, debug, trace};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
-use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType};
+use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType, WorldBoundaries};
 use crate::game_state::GameState;
+use crate::config::GameConfig;
 
 // Helper function to convert Direction to a human-readable string
 fn print_direction(direction: &Direction) -> &'static str {
@@ -236,7 +237,7 @@ pub async fn handle_client_message(
     // Process the message based on its type
     match message {
         ClientMessage::Register { name, .. } => {
-            handle_register(client, game_state, name, sender_tag, auth_key).await
+            handle_register(client, game_state, name, sender_tag, auth_key, game_state.get_config()).await
         },
         ClientMessage::Move { direction, .. } => {
             handle_move(client, game_state, direction, sender_tag, auth_key).await
@@ -280,7 +281,8 @@ async fn handle_register(
     game_state: &Arc<GameState>,
     name: String,
     sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
+    config: &GameConfig,
 ) -> Result<()> {
     // Check if this sender_tag is already associated with a registered player
     if let Some(existing_player_id) = game_state.get_player_id(&sender_tag) {
@@ -308,6 +310,7 @@ async fn handle_register(
     let register_ack = ServerMessage::RegisterAck {
         player_id: player_id.clone(),
         seq_num: next_seq_num(),
+        world_boundaries: WorldBoundaries::from_config(config),
     };
     
     // Create an authenticated message
@@ -350,8 +353,10 @@ async fn handle_move(
             };
             
             // Ensure the position stays within world boundaries
-            new_position.x = new_position.x.clamp(-100.0, 100.0);
-            new_position.y = new_position.y.clamp(-100.0, 100.0);
+            let config = game_state.get_config();
+            let (clamped_x, clamped_y) = config.clamp_position(new_position.x, new_position.y);
+            new_position.x = clamped_x;
+            new_position.y = clamped_y;
             
             // Try to update position
             if game_state.update_player_position(&player_id, new_position) {

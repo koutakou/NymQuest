@@ -318,6 +318,9 @@ async fn process_user_command(
                     Ok(mut state) => {
                         // Check if we have a player ID and clone it to avoid borrow issues
                         if let Some(player_id) = state.player_id.clone() {
+                            // Get world boundaries first (before mutable borrow)
+                            let boundaries = state.get_world_boundaries().cloned();
+                            
                             // Now get a mutable reference to the player
                             if let Some(player) = state.players.get_mut(&player_id) {
                                 let mut new_pos = player.position;
@@ -325,6 +328,11 @@ async fn process_user_command(
                                 // Use the configured movement speed
                                 let movement_speed = config.movement_speed;
                                 new_pos.apply_movement(move_vector, movement_speed);
+                                
+                                // Apply world boundaries if available from server
+                                if let Some(boundaries) = boundaries {
+                                    boundaries.clamp_position_mut(&mut new_pos);
+                                }
                                 
                                 clear_screen();
                                 info!("Moving {:?}", direction);
@@ -561,6 +569,9 @@ async fn handle_movement_direction(
             Ok(mut state) => {
                 // Check if we have a player ID and clone it to avoid borrow issues
                 if let Some(player_id) = state.player_id.clone() {
+                    // Get world boundaries first (before mutable borrow)
+                    let boundaries = state.get_world_boundaries().cloned();
+                    
                     // Now get a mutable reference to the player
                     if let Some(player) = state.players.get_mut(&player_id) {
                         let mut new_pos = player.position;
@@ -568,6 +579,11 @@ async fn handle_movement_direction(
                         // Use the configured movement speed
                         let movement_speed = config.movement_speed;
                         new_pos.apply_movement(move_vector, movement_speed);
+                        
+                        // Apply world boundaries if available from server
+                        if let Some(boundaries) = boundaries {
+                            boundaries.clamp_position_mut(&mut new_pos);
+                        }
                         
                         clear_screen();
                         info!("Moving {:?}", direction);
@@ -612,9 +628,10 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
     };
     
     let needs_refresh = match server_message.clone() {
-        ServerMessage::RegisterAck { player_id, seq_num: _ } => {
+        ServerMessage::RegisterAck { player_id, world_boundaries, seq_num: _ } => {
             state.set_player_id(player_id);
-            info!("Registration successful!");
+            state.set_world_boundaries(world_boundaries);
+            info!("Registration successful! Received world boundaries from server.");
             render_game_state(&state);
             false
         },

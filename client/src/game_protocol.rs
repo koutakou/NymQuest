@@ -21,8 +21,6 @@ impl Position {
         self.y += move_vector.1 * speed;
         
         // Clamp the position to world boundaries
-        self.x = self.x.clamp(-100.0, 100.0);
-        self.y = self.y.clamp(-100.0, 100.0);
     }
     
     // Calculate distance to another position
@@ -79,7 +77,12 @@ pub enum ServerMessageType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     // Confirms registration and provides the player ID
-    RegisterAck { player_id: String, seq_num: u64 },
+    RegisterAck { 
+        player_id: String, 
+        seq_num: u64,
+        // World boundaries for client synchronization
+        world_boundaries: WorldBoundaries,
+    },
     // Game state update
     GameState { 
         players: HashMap<String, Player>,
@@ -207,5 +210,36 @@ impl Direction {
             "downright" | "dr" | "southeast" | "se" => Some(Direction::DownRight),
             _ => None,
         }
+    }
+}
+
+// World boundaries
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorldBoundaries {
+    pub min_x: f32,
+    pub max_x: f32,
+    pub min_y: f32,
+    pub max_y: f32,
+}
+
+impl WorldBoundaries {
+    /// Clamp a position to stay within world boundaries
+    pub fn clamp_position(&self, x: f32, y: f32) -> (f32, f32) {
+        let clamped_x = x.clamp(self.min_x, self.max_x);
+        let clamped_y = y.clamp(self.min_y, self.max_y);
+        (clamped_x, clamped_y)
+    }
+    
+    /// Check if a position is within world boundaries
+    pub fn is_position_valid(&self, x: f32, y: f32) -> bool {
+        x >= self.min_x && x <= self.max_x && 
+        y >= self.min_y && y <= self.max_y
+    }
+    
+    /// Apply boundaries to a Position, modifying it in place
+    pub fn clamp_position_mut(&self, position: &mut Position) {
+        let (x, y) = self.clamp_position(position.x, position.y);
+        position.x = x;
+        position.y = y;
     }
 }
