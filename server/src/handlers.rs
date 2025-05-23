@@ -61,19 +61,42 @@ impl ReplayProtectionWindow {
     // Process a sequence number and determine if it's a replay
     // Returns true if the message is a replay, false if it's new
     fn process(&mut self, seq_num: u64) -> bool {
+        // Handle the very first message (when highest_seq is 0)
+        if self.highest_seq == 0 {
+            self.highest_seq = seq_num;
+            self.window = 1; // Mark the first sequence number as seen (bit 0)
+            return false; // Not a replay
+        }
+        
         // If the sequence number is higher than what we've seen, it's definitely not a replay
         if seq_num > self.highest_seq {
             // Calculate how much the window needs to slide
             let shift = std::cmp::min((seq_num - self.highest_seq) as u8, self.window_size);
             
             // Shift the window to accommodate the new highest sequence number
-            self.window = self.window << shift;
+            self.window = if shift >= 128 {
+                // If shift is >= 128, all bits will be shifted out, so clear the window
+                0
+            } else {
+                self.window << shift
+            };
             
-            // Mark the highest_seq (bit 0) as seen
-            self.window |= 1;
-            
-            // Update the highest sequence number
+            // Update the highest sequence number after shifting the window
+            let old_highest = self.highest_seq;
             self.highest_seq = seq_num;
+            
+            // For security, we need to mark all sequence numbers between old_highest and new highest
+            // that would fall within our window as "seen" to prevent replay attacks in that range
+            if seq_num - old_highest <= self.window_size as u64 {
+                // This is a normal case - mark all the intermediate sequence numbers as seen
+                for i in 1..=shift {
+                    // Mark bits for all sequence numbers between old_highest and new highest
+                    self.window |= 1u128 << (shift - i);
+                }
+            }
+            
+            // Mark the new highest sequence number as seen (bit 0 represents highest_seq)
+            self.window |= 1;
             
             return false; // Not a replay
         }
