@@ -8,26 +8,11 @@ on:
 env:
   CARGO_TERM_COLOR: always
 
-jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
-          draft: false
-          prerelease: false
+permissions:
+  contents: write
 
-  build-and-upload:
-    needs: create-release
+jobs:
+  build-and-release:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -90,6 +75,7 @@ jobs:
           cp client/target/${{ matrix.target }}/release/nym-mmorpg-client release/
           cp README.md release/
           cp LICENSE release/
+          cp BUILD.md release/
           cd release
           tar -czf ../nymquest-${{ matrix.name }}.tar.gz *
 
@@ -101,27 +87,19 @@ jobs:
           copy client\target\${{ matrix.target }}\release\nym-mmorpg-client.exe release\
           copy README.md release\
           copy LICENSE release\
+          copy BUILD.md release\
           cd release
           powershell Compress-Archive -Path * -DestinationPath ..\nymquest-${{ matrix.name }}.zip
 
-      - name: Upload Release Asset (Unix)
-        if: matrix.os != 'windows-latest'
-        uses: actions/upload-release-asset@v1
+      - name: Upload Release Asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            nymquest-${{ matrix.name }}.tar.gz
+            nymquest-${{ matrix.name }}.zip
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
+          draft: false
+          prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./nymquest-${{ matrix.name }}.tar.gz
-          asset_name: nymquest-${{ matrix.name }}.tar.gz
-          asset_content_type: application/gzip
-
-      - name: Upload Release Asset (Windows)
-        if: matrix.os == 'windows-latest'
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ needs.create-release.outputs.upload_url }}
-          asset_path: ./nymquest-${{ matrix.name }}.zip
-          asset_name: nymquest-${{ matrix.name }}.zip
-          asset_content_type: application/zip
