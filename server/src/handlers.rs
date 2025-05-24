@@ -265,6 +265,41 @@ async fn send_ack(
     Ok(())
 }
 
+/// Broadcast a server shutdown notification to all connected players
+pub async fn broadcast_shutdown_notification(
+    client: &MixnetClient, 
+    game_state: &Arc<GameState>,
+    message: &str,
+    shutdown_in_seconds: u8,
+    auth_key: &AuthKey
+) -> Result<()> {
+    // Get all connected players
+    let player_tags = game_state.get_player_tags();
+    info!("Broadcasting shutdown notification to {} players", player_tags.len());
+    
+    // Get next sequence number for the message
+    let seq_num = next_seq_num();
+    
+    // Create shutdown message with the warning time
+    let shutdown_msg = ServerMessage::ServerShutdown {
+        message: message.to_string(),
+        seq_num,
+        shutdown_in_seconds,
+    };
+    
+    let message_json = serde_json::to_string(&shutdown_msg)?;
+    
+    // Broadcast to all players
+    for tag in player_tags {
+        if let Err(e) = client.send_reply(tag.clone(), message_json.clone()).await {
+            warn!("Failed to send shutdown notification to a player: {}", e);
+        }
+    }
+    
+    info!("Shutdown notification sent to all players");
+    Ok(())
+}
+
 /// Broadcast game state to all active players
 pub async fn broadcast_game_state(
     client: &MixnetClient,

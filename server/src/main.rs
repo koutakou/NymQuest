@@ -8,7 +8,7 @@ mod persistence;
 
 use game_protocol::{Player, Position, ClientMessage, ServerMessage};
 use game_state::GameState;
-use handlers::{handle_client_message, broadcast_game_state, send_heartbeat_requests, cleanup_inactive_players, init_rate_limiter, cleanup_rate_limiter};
+use handlers::{handle_client_message, broadcast_game_state, send_heartbeat_requests, cleanup_inactive_players, init_rate_limiter, cleanup_rate_limiter, broadcast_shutdown_notification};
 use utils::save_server_address;
 use message_auth::{AuthKey, AuthenticatedMessage};
 use config::GameConfig;
@@ -49,8 +49,9 @@ fn init_logging() -> Result<()> {
     
     // Initialize the subscriber with environment-based filtering
     // Default to INFO level, can be overridden with RUST_LOG env var
+    // Filter out h2 close_notify warnings which are common with mixnet connections
     let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+        .unwrap_or_else(|_| EnvFilter::new("info,h2=error"));
     
     tracing_subscriber::registry()
         .with(filter)
@@ -268,11 +269,21 @@ async fn main() -> Result<()> {
                     info!("Final game state saved successfully");
                 }
                 
-                // Send disconnect message to all players
-                info!("Notifying connected players of shutdown...");
-                if let Err(e) = broadcast_game_state(&client, &game_state, None, &auth_key).await {
-                    error!("Failed to send final state broadcast: {}", e);
+                // Send shutdown notification to all players with 5 second countdown
+                info!("Notifying connected players of server shutdown...");
+                if let Err(e) = broadcast_shutdown_notification(
+                    &client, 
+                    &game_state, 
+                    "Server is shutting down. You will be disconnected shortly.", 
+                    5, // 5 second countdown before forced disconnect
+                    &auth_key
+                ).await {
+                    error!("Failed to send shutdown notification: {}", e);
                 }
+                
+                // Wait a moment to allow clients to receive the notification
+                info!("Waiting for notification delivery...");
+                tokio::time::sleep(Duration::from_secs(1)).await;
                 
                 // Clean disconnect from mixnet
                 info!("Disconnecting from Nym mixnet...");

@@ -132,11 +132,14 @@ pub enum ServerMessageType {
     Ack,
     PlayerLeft,
     PlayerUpdate,
+    ServerShutdown,
 }
 
 // Message types that the server can send to the client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
+    // Server is shutting down, clients should disconnect
+    ServerShutdown { message: String, seq_num: u64, shutdown_in_seconds: u8 },
     // Confirms registration and provides the player ID with protocol version negotiation
     RegisterAck { 
         player_id: String, 
@@ -173,6 +176,7 @@ impl ServerMessage {
     // Get the message type
     pub fn get_type(&self) -> ServerMessageType {
         match self {
+            ServerMessage::ServerShutdown { .. } => ServerMessageType::ServerShutdown,
             ServerMessage::RegisterAck { .. } => ServerMessageType::RegisterAck,
             ServerMessage::GameState { .. } => ServerMessageType::GameState,
             ServerMessage::Event { .. } => ServerMessageType::Event,
@@ -188,6 +192,7 @@ impl ServerMessage {
     // Get the sequence number
     pub fn get_seq_num(&self) -> u64 {
         match self {
+            ServerMessage::ServerShutdown { seq_num, .. } => *seq_num,
             ServerMessage::RegisterAck { seq_num, .. } => *seq_num,
             ServerMessage::GameState { seq_num, .. } => *seq_num,
             ServerMessage::Event { seq_num, .. } => *seq_num,

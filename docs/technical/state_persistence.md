@@ -13,6 +13,30 @@ The server persistence system automatically:
 - **Maintains privacy** by excluding network-sensitive information
 - **Ensures graceful shutdown** with final state saves
 - **Prevents storage corruption** with permanent storage locations
+- **Notifies clients of shutdown** with countdown before forced disconnect
+
+## Server Shutdown Process
+
+The server implements a graceful shutdown procedure that ensures both data integrity and a good user experience:
+
+1. **Shutdown Signal Detection**: The server captures termination signals (e.g., Ctrl+C) to initiate the shutdown sequence.
+
+2. **Final State Save**: Before disconnecting, the server performs a final save of the game state, ensuring no progress is lost.
+
+3. **Client Notification**: All connected clients are sent a `ServerShutdown` message containing:
+   - A user-friendly shutdown message
+   - A countdown (in seconds) before forced disconnect
+   - A unique sequence number for tracking
+
+4. **Delivery Confirmation**: The server waits briefly to ensure the notification has time to reach clients.
+
+5. **Mixnet Disconnection**: The server gracefully disconnects from the Nym mixnet, ensuring all pending messages are flushed.
+
+This process ensures that:
+- Players receive advance warning about the shutdown
+- Client applications can display appropriate UI notifications
+- No game state is lost during shutdown
+- The Nym mixnet connection is properly terminated
 
 ## Implementation Details
 

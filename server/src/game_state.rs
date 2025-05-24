@@ -415,6 +415,20 @@ impl GameState {
         }
     }
 
+    /// Get all sender tags for connected players
+    pub fn get_player_tags(&self) -> Vec<AnonymousSenderTag> {
+        match self.connections.lock() {
+            Ok(connections) => {
+                // Extract the sender tags from the (player_id, sender_tag) tuples
+                connections.iter().map(|(_, tag)| tag.clone()).collect()
+            },
+            Err(e) => {
+                error!("Failed to get player tags: {}", e);
+                Vec::new()
+            }
+        }
+    }
+    
     /// Get all active connections
     pub fn get_connections(&self) -> Vec<PlayerTag> {
         match self.connections.lock() {

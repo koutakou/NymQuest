@@ -720,6 +720,25 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
     };
     
     let needs_refresh = match server_message.clone() {
+        ServerMessage::ServerShutdown { message, shutdown_in_seconds, seq_num: _ } => {
+            // Display a prominent shutdown warning
+            let warning = format!("⚠️ SERVER SHUTDOWN IN {} SECONDS: {}", shutdown_in_seconds, message);
+            
+            // Add to chat history as a system message
+            state.add_chat_message("SERVER SHUTDOWN".to_string(), warning.clone());
+            
+            // Print a very visible warning in the console
+            error!("{}\n{}", "⚠️ SERVER SHUTDOWN NOTICE ⚠️".red().bold(), warning.red().bold());
+            
+            // Immediate exit without sending a disconnect message
+            info!("Server initiated shutdown. Exiting immediately without sending disconnect message...");
+            
+            // Force immediate exit - code after this will not execute
+            std::process::exit(0);
+            
+            // This line is never reached, but keeps the compiler happy
+            true
+        },
         ServerMessage::RegisterAck { player_id, world_boundaries, negotiated_version, seq_num: _ } => {
             state.set_player_id(player_id);
             state.set_world_boundaries(world_boundaries);
@@ -770,6 +789,11 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
         ServerMessage::HeartbeatRequest { seq_num: _ } => {
             // Heartbeat requests are handled in the NetworkManager
             // We don't need to do anything here in the main loop
+            false
+        },
+        _ => {
+            // Handle any future message types gracefully
+            warn!("Received unknown server message type");
             false
         }
     };

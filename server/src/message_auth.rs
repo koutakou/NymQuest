@@ -1,9 +1,12 @@
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
-use anyhow::{Result, anyhow};
-use serde::{Serialize, Deserialize};
+use anyhow::{anyhow, Result};
+use base64::{Engine, engine::general_purpose};
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
+use std::fs;
+use tracing::info;
 use rand::{RngCore, rngs::OsRng};
-use base64::{Engine as _, engine::general_purpose};
 
 // Type alias for HMAC-SHA256
 type HmacSha256 = Hmac<Sha256>;
@@ -37,6 +40,36 @@ impl AuthKey {
         let key = general_purpose::STANDARD.decode(encoded)
             .map_err(|e| anyhow!("Failed to decode auth key: {}", e))?;
         Ok(Self { key })
+    }
+    
+    /// Save the authentication key to a file
+    pub fn save_to_file(&self, path: &Path) -> Result<()> {
+        // Create parent directory if it doesn't exist
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        
+        // Convert the key to base64 and save it
+        let encoded = self.to_base64();
+        fs::write(path, encoded)?;
+        Ok(())
+    }
+    
+    /// Load the authentication key from a file, or create a new one if the file doesn't exist
+    pub fn load_or_create(path: &Path) -> Result<Self> {
+        if path.exists() {
+            // Load existing key
+            let encoded = fs::read_to_string(path)?;
+            let key = Self::from_base64(&encoded)?;
+            info!("Loaded existing authentication key");
+            Ok(key)
+        } else {
+            // Create a new key and save it
+            let key = Self::new_random();
+            key.save_to_file(path)?;
+            info!("Generated and saved new authentication key");
+            Ok(key)
+        }
     }
 
     /// Generate an authentication tag for the given message
