@@ -67,6 +67,8 @@ pub struct NetworkManager {
     last_rate_limit_update: Instant,
     /// Negotiated protocol version for this session
     negotiated_protocol_version: Option<u16>,
+    /// Last time a message was sent (for pacing)
+    last_message_sent: Option<Instant>,
 }
 
 impl NetworkManager {
@@ -127,6 +129,7 @@ impl NetworkManager {
             rate_limit_tokens: MAX_BURST_SIZE,
             last_rate_limit_update: Instant::now(),
             negotiated_protocol_version: None,
+            last_message_sent: None,
         })
     }
     
@@ -157,6 +160,20 @@ impl NetworkManager {
         
         // Consume a token for this message
         self.rate_limit_tokens = self.rate_limit_tokens.saturating_sub(1);
+        
+        // Apply message pacing for privacy protection (prevent timing correlation attacks)
+        if self.config.enable_message_pacing {
+            if let Some(last_sent) = self.last_message_sent {
+                let elapsed = last_sent.elapsed();
+                let min_interval = Duration::from_millis(self.config.message_pacing_interval_ms);
+                
+                if elapsed < min_interval {
+                    let wait_time = min_interval - elapsed;
+                    debug!("Applying message pacing: waiting {:?} for privacy protection", wait_time);
+                    time::sleep(wait_time).await;
+                }
+            }
+        }
         
         if let Some(client) = &mut self.client {
             // For all other message types, attach sequence number
@@ -241,6 +258,9 @@ impl NetworkManager {
                 // Update mixnet connection status
                 monitor.update_mixnet_status(true, Some(3), None);
             }
+            
+            // Update pacing
+            self.last_message_sent = Some(Instant::now());
         }
         
         Ok(())

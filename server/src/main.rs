@@ -23,6 +23,7 @@ use anyhow::Result;
 use tracing::{info, warn, error, debug};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 use tokio::time::{interval, timeout};
+use std::time::Instant;
 
 // For thread-safe handling of received message tracking
 #[macro_use]
@@ -220,6 +221,9 @@ async fn main() -> Result<()> {
     // Add rate limiter cleanup interval (cleanup every 5 minutes)
     let mut rate_limiter_cleanup_interval = interval(Duration::from_secs(300));
     
+    // Message processing pacing for privacy protection
+    let mut last_message_processed: Option<Instant> = None;
+    
     // Skip the first tick to avoid immediate execution
     heartbeat_interval.tick().await;
     cleanup_interval.tick().await;
@@ -234,7 +238,7 @@ async fn main() -> Result<()> {
                 match received_message {
                     Some(message) => {
                         // Process the message
-                        if let Err(e) = process_incoming_message(&client, &game_state, message.message, message.sender_tag, &auth_key).await {
+                        if let Err(e) = process_incoming_message(&client, &game_state, message.message, message.sender_tag, &auth_key, &game_config, &mut last_message_processed).await {
                             error!("Error processing incoming message: {}", e);
                         }
                     }
@@ -300,9 +304,26 @@ async fn process_incoming_message(
     game_state: &Arc<GameState>,
     received_message: impl Into<Vec<u8>>,
     sender_tag: Option<AnonymousSenderTag>,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
+    game_config: &GameConfig,
+    last_message_processed: &mut Option<Instant>
 ) -> Result<()> {
     let message_content = received_message.into();
+    
+    // Apply message processing pacing for privacy protection (prevent timing correlation attacks)
+    if game_config.enable_message_processing_pacing {
+        if let Some(last_processed) = *last_message_processed {
+            let elapsed = last_processed.elapsed();
+            let min_interval = Duration::from_millis(game_config.message_processing_interval_ms);
+            
+            if elapsed < min_interval {
+                let wait_time = min_interval - elapsed;
+                debug!("Applying message processing pacing: waiting {:?} for privacy protection", wait_time);
+                tokio::time::sleep(wait_time).await;
+            }
+        }
+        *last_message_processed = Some(Instant::now());
+    }
     
     // Skip empty messages
     if message_content.is_empty() {

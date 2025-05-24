@@ -30,6 +30,10 @@ pub struct ClientConfig {
     pub server_address_file: String,
     /// Movement speed for player movement
     pub movement_speed: f32,
+    /// Minimum interval between message sends in milliseconds (privacy protection)
+    pub message_pacing_interval_ms: u64,
+    /// Enable message pacing for enhanced privacy (adds jitter to prevent timing analysis)
+    pub enable_message_pacing: bool,
 }
 
 impl Default for ClientConfig {
@@ -47,6 +51,8 @@ impl Default for ClientConfig {
             debug_mode: false,
             server_address_file: "server_address.txt".to_string(),
             movement_speed: 14.0, // Same as server default
+            message_pacing_interval_ms: 100,
+            enable_message_pacing: false,
         }
     }
 }
@@ -69,6 +75,8 @@ impl ClientConfig {
         config.debug_mode = Self::load_env_bool("NYMQUEST_CLIENT_DEBUG_MODE", config.debug_mode)?;
         config.server_address_file = Self::load_env_string("NYMQUEST_CLIENT_SERVER_ADDRESS_FILE", config.server_address_file);
         config.movement_speed = Self::load_env_f32("NYMQUEST_CLIENT_MOVEMENT_SPEED", config.movement_speed)?;
+        config.message_pacing_interval_ms = Self::load_env_u64("NYMQUEST_CLIENT_MESSAGE_PACING_INTERVAL_MS", config.message_pacing_interval_ms)?;
+        config.enable_message_pacing = Self::load_env_bool("NYMQUEST_CLIENT_ENABLE_MESSAGE_PACING", config.enable_message_pacing)?;
         
         // Validate configuration
         config.validate()?;
@@ -83,6 +91,8 @@ impl ClientConfig {
         info!("Debug mode: {}", config.debug_mode);
         info!("Server address file: {}", config.server_address_file);
         info!("Movement speed: {}", config.movement_speed);
+        info!("Message pacing interval: {}ms", config.message_pacing_interval_ms);
+        info!("Enable message pacing: {}", config.enable_message_pacing);
         
         Ok(config)
     }
@@ -149,6 +159,12 @@ impl ClientConfig {
         // Validate movement speed
         if self.movement_speed <= 0.0 {
             return Err(anyhow!("Invalid movement speed: {} (must be greater than 0)", self.movement_speed));
+        }
+        
+        // Validate message pacing interval
+        if self.message_pacing_interval_ms == 0 || self.message_pacing_interval_ms > 10000 {
+            return Err(anyhow!("Invalid message pacing interval: {} (must be 1-10000ms)", 
+                              self.message_pacing_interval_ms));
         }
         
         Ok(())

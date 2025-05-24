@@ -24,6 +24,8 @@ use tracing::{info, warn};
 /// - NYMQUEST_PERSISTENCE_DIR: Directory for saving game state (default: "./game_data")
 /// - NYMQUEST_MESSAGE_RATE_LIMIT: Messages per second limit per connection (default: 10)
 /// - NYMQUEST_MESSAGE_BURST_SIZE: Maximum burst size for rate limiting (default: 20)
+/// - NYMQUEST_MESSAGE_PROCESSING_INTERVAL_MS: Minimum interval between processing messages in milliseconds (default: 100)
+/// - NYMQUEST_ENABLE_MESSAGE_PROCESSING_PACING: Enable message processing pacing for enhanced privacy (default: false)
 #[derive(Debug, Clone)]
 pub struct GameConfig {
     /// Maximum X coordinate boundary for the game world
@@ -68,6 +70,10 @@ pub struct GameConfig {
     pub message_rate_limit: f32,
     /// Maximum burst size for rate limiting (number of tokens in bucket)
     pub message_burst_size: u32,
+    /// Minimum interval between processing messages in milliseconds (privacy protection)
+    pub message_processing_interval_ms: u64,
+    /// Enable message processing pacing for enhanced privacy
+    pub enable_message_processing_pacing: bool,
 }
 
 impl Default for GameConfig {
@@ -94,6 +100,8 @@ impl Default for GameConfig {
             persistence_dir: "./game_data".to_string(),
             message_rate_limit: 10.0,
             message_burst_size: 20,
+            message_processing_interval_ms: 100,
+            enable_message_processing_pacing: false,
         }
     }
 }
@@ -130,6 +138,8 @@ impl GameConfig {
         // Rate limiting settings
         let message_rate_limit = Self::load_env_f32("NYMQUEST_MESSAGE_RATE_LIMIT", 10.0)?;
         let message_burst_size = Self::load_env_u32("NYMQUEST_MESSAGE_BURST_SIZE", 20)?;
+        let message_processing_interval_ms = Self::load_env_u64("NYMQUEST_MESSAGE_PROCESSING_INTERVAL_MS", 100)?;
+        let enable_message_processing_pacing = Self::parse_env_bool("NYMQUEST_ENABLE_MESSAGE_PROCESSING_PACING", false);
         
         // Validate rate limiting settings
         if message_rate_limit <= 0.0 {
@@ -176,6 +186,8 @@ impl GameConfig {
             persistence_dir,
             message_rate_limit,
             message_burst_size,
+            message_processing_interval_ms,
+            enable_message_processing_pacing,
         })
     }
     
@@ -259,6 +271,12 @@ impl GameConfig {
         if self.attack_damage >= self.initial_player_health {
             warn!("Attack damage ({}) is very high compared to initial health ({})", 
                   self.attack_damage, self.initial_player_health);
+        }
+        
+        // Validate message processing pacing
+        if self.message_processing_interval_ms == 0 || self.message_processing_interval_ms > 10000 {
+            return Err(anyhow!("Invalid message processing interval: {} (must be 1-10000ms)", 
+                              self.message_processing_interval_ms));
         }
         
         Ok(())

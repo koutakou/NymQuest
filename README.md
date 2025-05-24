@@ -115,6 +115,34 @@ Default values:
 - **Burst size**: 20 messages maximum in rapid succession
 - **Cleanup interval**: 5 minutes for unused buckets
 
+#### Message Pacing Configuration
+
+The game includes configurable message pacing to enhance privacy by preventing timing correlation attacks:
+
+**Client Configuration:**
+```bash
+# Enable message pacing for privacy protection (default: false)
+export NYMQUEST_CLIENT_ENABLE_MESSAGE_PACING=true
+
+# Minimum interval between message sends in milliseconds (default: 100ms)
+export NYMQUEST_CLIENT_MESSAGE_PACING_INTERVAL_MS=100
+```
+
+**Server Configuration:**
+```bash
+# Enable message processing pacing for privacy protection (default: false)
+export NYMQUEST_ENABLE_MESSAGE_PROCESSING_PACING=true
+
+# Minimum interval between processing messages in milliseconds (default: 100ms)
+export NYMQUEST_MESSAGE_PROCESSING_INTERVAL_MS=100
+```
+
+**Privacy Benefits:**
+- **Timing correlation resistance**: Controlled delays prevent attackers from correlating messages by timing
+- **Traffic analysis protection**: Reduces patterns that could be used for traffic analysis
+- **Configurable trade-offs**: Allows balancing privacy enhancement with responsiveness
+- **Production-ready**: Disabled by default to maintain game responsiveness, can be enabled as needed
+
 #### Client-Side Awareness
 
 The client includes rate limiting awareness to prevent hitting server limits:
@@ -171,6 +199,11 @@ This monitoring system enhances user awareness while preserving the core privacy
 - **Replay Protection**: Sliding window mechanism prevents message replay attacks
 - **Connection Health**: Automatic heartbeat system monitors connection status
 - **Protocol Negotiation**: Version compatibility checking ensures smooth upgrades
+- **Message Pacing**: Configurable message pacing intervals to prevent timing correlation attacks
+  - Client-side message pacing to introduce controlled delays between message sends
+  - Server-side message processing pacing to prevent timing analysis
+  - Enhances privacy by reducing traffic analysis vulnerabilities
+- **Anonymous Player Identification**: Uses anonymous sender tags for player tracking
 
 ### Performance & Reliability
 - **Async Architecture**: Built on Tokio for high-performance async operations
