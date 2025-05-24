@@ -154,15 +154,9 @@ async fn main() -> Result<()> {
 
     info!("Server is ready and listening for connections");
 
-    // Initialize game state persistence
-    let persistence_enabled = std::env::var("NYMQUEST_ENABLE_PERSISTENCE")
-        .map(|v| v.to_lowercase() == "true")
-        .unwrap_or(true); // Default to enabled
-
-    let persistence_dir =
-        std::env::var("NYMQUEST_PERSISTENCE_DIR").unwrap_or_else(|_| "./game_data".to_string());
-
-    let persistence = GameStatePersistence::new(&persistence_dir, persistence_enabled);
+    // Initialize game state persistence using config values
+    let persistence =
+        GameStatePersistence::new(&game_config.persistence_dir, game_config.enable_persistence);
 
     // Initialize persistence directory
     if let Err(e) = persistence.initialize().await {

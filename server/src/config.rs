@@ -20,6 +20,9 @@ use tracing::{info, warn};
 /// - NYMQUEST_INITIAL_PLAYER_HEALTH: Starting player health (default: 100)
 /// - NYMQUEST_ATTACK_DAMAGE: Base attack damage (default: 20)
 /// - NYMQUEST_ATTACK_RANGE: Attack range in world units (default: 28.0)
+/// - NYMQUEST_BASE_DAMAGE: Base damage amount (default: 10)
+/// - NYMQUEST_CRIT_CHANCE: Critical hit chance (0.0 to 1.0) (default: 0.15)
+/// - NYMQUEST_CRIT_MULTIPLIER: Critical hit damage multiplier (default: 2.0)
 /// - NYMQUEST_ENABLE_PERSISTENCE: Enable game state persistence (default: true)
 /// - NYMQUEST_PERSISTENCE_DIR: Directory for saving game state (default: "./game_data")
 /// - NYMQUEST_MESSAGE_RATE_LIMIT: Messages per second limit per connection (default: 10)
@@ -159,8 +162,8 @@ impl GameConfig {
             Self::load_env_f32("NYMQUEST_CRIT_MULTIPLIER", config.crit_multiplier)?;
 
         // Persistence settings
-        let _enable_persistence = Self::parse_env_bool("NYMQUEST_ENABLE_PERSISTENCE", true);
-        let _persistence_dir =
+        config.enable_persistence = Self::parse_env_bool("NYMQUEST_ENABLE_PERSISTENCE", true);
+        config.persistence_dir =
             env::var("NYMQUEST_PERSISTENCE_DIR").unwrap_or_else(|_| "./game_data".to_string());
 
         // Rate limiting settings
@@ -222,34 +225,7 @@ impl GameConfig {
             config.max_players, config.max_player_name_length, config.max_chat_message_length
         );
 
-        Ok(GameConfig {
-            world_max_x: config.world_max_x,
-            world_min_x: config.world_min_x,
-            world_max_y: config.world_max_y,
-            world_min_y: config.world_min_y,
-            movement_speed: config.movement_speed,
-            max_player_name_length: config.max_player_name_length,
-            max_chat_message_length: config.max_chat_message_length,
-            heartbeat_interval_seconds: config.heartbeat_interval_seconds,
-            heartbeat_timeout_seconds: config.heartbeat_timeout_seconds,
-            max_players: config.max_players,
-            attack_cooldown_seconds: config.attack_cooldown_seconds,
-            initial_player_health: config.initial_player_health,
-            attack_damage: config.attack_damage,
-            attack_range: config.attack_range,
-            base_damage: config.base_damage,
-            crit_chance: config.crit_chance,
-            crit_multiplier: config.crit_multiplier,
-            enable_persistence: config.enable_persistence,
-            persistence_dir: config.persistence_dir.clone(),
-            message_rate_limit: config.message_rate_limit,
-            message_burst_size: config.message_burst_size,
-            message_processing_interval_ms: config.message_processing_interval_ms,
-            enable_message_processing_pacing: config.enable_message_processing_pacing,
-            state_broadcast_interval_seconds: config.state_broadcast_interval_seconds,
-            inactive_player_cleanup_interval_seconds: config
-                .inactive_player_cleanup_interval_seconds,
-        })
+        Ok(config)
     }
 
     /// Validate the configuration values for consistency and safety
@@ -481,9 +457,11 @@ mod tests {
 
     #[test]
     fn test_invalid_world_boundaries() {
-        let mut config = GameConfig::default();
-        config.world_min_x = 100.0;
-        config.world_max_x = -100.0;
+        let config = GameConfig {
+            world_min_x: 100.0,
+            world_max_x: -100.0,
+            ..Default::default()
+        };
         assert!(config.validate().is_err());
     }
 
