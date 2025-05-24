@@ -1,12 +1,12 @@
-use hmac::{Hmac, Mac};
-use sha2::Sha256;
 use anyhow::{anyhow, Result};
-use base64::{Engine, engine::general_purpose};
+use base64::{engine::general_purpose, Engine};
+use hmac::{Hmac, Mac};
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use sha2::Sha256;
 use std::fs;
+use std::path::Path;
 use tracing::info;
-use rand::{RngCore, rngs::OsRng};
 
 // Type alias for HMAC-SHA256
 type HmacSha256 = Hmac<Sha256>;
@@ -28,7 +28,9 @@ impl AuthKey {
     /// Create an auth key from an existing byte array
     #[allow(dead_code)]
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self { key: bytes.to_vec() }
+        Self {
+            key: bytes.to_vec(),
+        }
     }
 
     /// Encode the key as a base64 string for storage
@@ -39,11 +41,12 @@ impl AuthKey {
     /// Create an auth key from a base64 encoded string
     #[allow(dead_code)]
     pub fn from_base64(encoded: &str) -> Result<Self> {
-        let key = general_purpose::STANDARD.decode(encoded)
+        let key = general_purpose::STANDARD
+            .decode(encoded)
             .map_err(|e| anyhow!("Failed to decode auth key: {}", e))?;
         Ok(Self { key })
     }
-    
+
     /// Save the authentication key to a file
     #[allow(dead_code)]
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
@@ -51,13 +54,13 @@ impl AuthKey {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        
+
         // Convert the key to base64 and save it
         let encoded = self.to_base64();
         fs::write(path, encoded)?;
         Ok(())
     }
-    
+
     /// Load the authentication key from a file, or create a new one if the file doesn't exist
     #[allow(dead_code)]
     pub fn load_or_create(path: &Path) -> Result<Self> {
@@ -81,17 +84,17 @@ impl AuthKey {
         // Serialize the message to a JSON string
         let message_str = serde_json::to_string(message)
             .map_err(|e| anyhow!("Failed to serialize message: {}", e))?;
-        
+
         // Create a new HMAC instance
         let mut mac = HmacSha256::new_from_slice(&self.key)
             .map_err(|e| anyhow!("Failed to create HMAC: {}", e))?;
-        
+
         // Update the HMAC with the message content
         mac.update(message_str.as_bytes());
-        
+
         // Finalize and get the result
         let result = mac.finalize().into_bytes();
-        
+
         // Return the Base64 encoded tag
         Ok(general_purpose::STANDARD.encode(result))
     }
@@ -119,7 +122,9 @@ impl<T: Serialize> AuthenticatedMessage<T> {
 
     /// Verify that this message has not been tampered with
     pub fn verify(&self, auth_key: &AuthKey) -> Result<bool>
-    where T: Serialize + Clone {
+    where
+        T: Serialize + Clone,
+    {
         auth_key.verify_tag(&self.message, &self.auth_tag)
     }
 }

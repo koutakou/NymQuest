@@ -28,40 +28,40 @@ impl rustyline::completion::Completer for GameHistoryHinter {
     ) -> Result<(usize, Vec<Self::Candidate>)> {
         // Command completion functionality
         let mut completions = Vec::new();
-        
+
         // Only provide completions for commands that start with / or are at beginning
         if line.starts_with('/') || line.is_empty() {
-            let partial = if let Some(stripped) = line.strip_prefix('/') { stripped } else { line };
+            let partial = if let Some(stripped) = line.strip_prefix('/') {
+                stripped
+            } else {
+                line
+            };
             let _pos_offset = if line.starts_with('/') { 1 } else { 0 };
-            
+
             // Full command list for auto-completion
             let commands = [
-                "register", "r",
-                "move", "m", "go", 
-                "attack", "a",
-                "chat", "c", "say",
-                "help", "h", "?",
-                "quit", "q", "exit",
-                "up", "u", "north", "n",
-                "down", "d", "south", "s",
-                "left", "l", "west", "w",
-                "right", "ri", "east", "e",
-                "ne", "nw", "se", "sw"
+                "register", "r", "move", "m", "go", "attack", "a", "chat", "c", "say", "help", "h",
+                "?", "quit", "q", "exit", "up", "u", "north", "n", "down", "d", "south", "s",
+                "left", "l", "west", "w", "right", "ri", "east", "e", "ne", "nw", "se", "sw",
             ];
-            
+
             for &cmd in &commands {
                 if cmd.starts_with(partial) {
-                    let display = if line.starts_with('/') { format!("/{}\t", cmd) } else { cmd.to_string() };
+                    let display = if line.starts_with('/') {
+                        format!("/{}\t", cmd)
+                    } else {
+                        cmd.to_string()
+                    };
                     completions.push(rustyline::completion::Pair {
                         display,
                         replacement: cmd.to_string(),
                     });
                 }
             }
-            
+
             return Ok((pos - partial.len(), completions));
         }
-        
+
         Ok((pos, completions))
     }
 }
@@ -77,8 +77,12 @@ impl rustyline::hint::Hinter for GameHistoryHinter {
 
         // If no history hint, provide suggestions for common commands
         if line.starts_with('/') || line.is_empty() {
-            let partial = if let Some(stripped) = line.strip_prefix('/') { stripped } else { line };
-            
+            let partial = if let Some(stripped) = line.strip_prefix('/') {
+                stripped
+            } else {
+                line
+            };
+
             // Command suggestions based on what user has typed
             let suggestions = [
                 ("r", "register"),
@@ -103,7 +107,7 @@ impl rustyline::hint::Hinter for GameHistoryHinter {
                     // Return the remainder of the full command as a hint
                     return Some(full[partial.len()..].to_string());
                 }
-                
+
                 if abbrev.starts_with(partial) && partial != *abbrev {
                     // Return the remainder of the abbreviated command as a hint
                     return Some(abbrev[partial.len()..].to_string());
@@ -127,7 +131,10 @@ impl rustyline::highlight::Highlighter for GameHistoryHinter {
 }
 
 impl rustyline::validate::Validator for GameHistoryHinter {
-    fn validate(&self, _ctx: &mut rustyline::validate::ValidationContext) -> Result<rustyline::validate::ValidationResult> {
+    fn validate(
+        &self,
+        _ctx: &mut rustyline::validate::ValidationContext,
+    ) -> Result<rustyline::validate::ValidationResult> {
         // All input is valid for our case
         Ok(rustyline::validate::ValidationResult::Valid(None))
     }

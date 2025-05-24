@@ -1,6 +1,6 @@
 use std::collections::{HashMap, VecDeque};
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::game_protocol::{Player, WorldBoundaries};
 use crate::status_monitor::StatusMonitor;
@@ -57,7 +57,7 @@ impl GameState {
         self.player_id = Some(id);
         self.update_timestamp();
     }
-    
+
     /// Get the player ID if registered
     pub fn get_player_id(&self) -> Option<&String> {
         self.player_id.as_ref()
@@ -78,7 +78,7 @@ impl GameState {
     pub fn set_typing(&mut self, is_typing: bool) {
         self.is_typing = is_typing;
     }
-    
+
     /// Add a new chat message to the history
     pub fn add_chat_message(&mut self, sender: String, content: String) {
         // Get current timestamp in milliseconds
@@ -86,28 +86,28 @@ impl GameState {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_millis() as u64;
-        
+
         // Create a new chat message
         let message = ChatMessage {
             sender,
             content,
             timestamp,
         };
-        
+
         // Add to history (most recent at the end)
         self.chat_history.push_back(message);
-        
+
         // Ensure we don't exceed the maximum history size
         while self.chat_history.len() > self.max_chat_history {
             self.chat_history.pop_front();
         }
     }
-    
+
     /// Get a slice of the most recent chat messages
     pub fn recent_chat_messages(&self, count: usize) -> Vec<&ChatMessage> {
         let history_len = self.chat_history.len();
         let start_idx = history_len.saturating_sub(count);
-        
+
         self.chat_history.iter().skip(start_idx).collect()
     }
 
@@ -115,7 +115,7 @@ impl GameState {
     pub fn set_world_boundaries(&mut self, boundaries: WorldBoundaries) {
         self.world_boundaries = Some(boundaries);
     }
-    
+
     /// Get world boundaries if available
     pub fn get_world_boundaries(&self) -> Option<&WorldBoundaries> {
         self.world_boundaries.as_ref()

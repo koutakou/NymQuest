@@ -19,6 +19,23 @@ NymQuest is a privacy-preserving multiplayer game that leverages the Nym mixnet 
    /register YourName
    ```
 
+## Releases
+
+### Download Pre-built Binaries
+
+Pre-built binaries for all supported platforms are available from the [GitHub Releases](../../releases) page:
+
+- **Linux (x86_64)**: `nymquest-linux-x86_64.tar.gz`
+- **Windows (x86_64)**: `nymquest-windows-x86_64.zip`  
+- **macOS (Intel)**: `nymquest-macos-x86_64.tar.gz`
+- **macOS (Apple Silicon)**: `nymquest-macos-aarch64.tar.gz`
+
+Each release includes both the server and client binaries along with documentation.
+
+### Building from Source
+
+For detailed build instructions including cross-platform compilation, see [BUILD.md](./BUILD.md).
+
 ## Key Features
 
 - **Private Communications**: All game data transmitted through the Nym mixnet

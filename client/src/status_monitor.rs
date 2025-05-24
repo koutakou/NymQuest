@@ -1,6 +1,6 @@
-use std::time::{Duration, Instant};
 use colored::{ColoredString, Colorize};
 use std::collections::VecDeque;
+use std::time::{Duration, Instant};
 
 /// Maximum number of latency samples to keep for statistics
 const MAX_LATENCY_SAMPLES: usize = 20;
@@ -18,21 +18,21 @@ pub enum ConnectionHealth {
 /// Privacy protection level indicators
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrivacyLevel {
-    FullyProtected,    // Connected through mixnet with full anonymity
-    Protected,         // Connected through mixnet with some metadata leakage
-    Degraded,          // Connection issues affecting privacy
-    Compromised,       // Direct connection or privacy failure
+    FullyProtected, // Connected through mixnet with full anonymity
+    Protected,      // Connected through mixnet with some metadata leakage
+    Degraded,       // Connection issues affecting privacy
+    Compromised,    // Direct connection or privacy failure
 }
 
 /// Message delivery status
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeliveryStatus {
-    Sent,       // Message sent to mixnet
+    Sent, // Message sent to mixnet
     #[allow(dead_code)] // Part of complete delivery tracking API for future use
-    InTransit,  // Message in mixnet pipeline
-    Delivered,  // Acknowledgment received
-    Failed,     // Delivery failed
-    Timeout,    // Delivery timeout
+    InTransit, // Message in mixnet pipeline
+    Delivered, // Acknowledgment received
+    Failed, // Delivery failed
+    Timeout, // Delivery timeout
 }
 
 /// Represents a tracked message for delivery confirmation
@@ -161,7 +161,7 @@ impl StatusMonitor {
     /// Record that a message was sent
     pub fn record_message_sent(&mut self, seq_num: u64) {
         self.network_stats.messages_sent += 1;
-        
+
         // Add message to tracking queue
         let tracked_msg = TrackedMessage {
             seq_num,
@@ -169,14 +169,14 @@ impl StatusMonitor {
             status: DeliveryStatus::Sent,
             retries: 0,
         };
-        
+
         self.tracked_messages.push_back(tracked_msg);
-        
+
         // Limit tracking queue size
         while self.tracked_messages.len() > 100 {
             self.tracked_messages.pop_front();
         }
-        
+
         self.update_status();
     }
 
@@ -186,22 +186,26 @@ impl StatusMonitor {
         self.network_stats.messages_delivered += 1;
         self.network_stats.last_successful_communication = Some(Instant::now());
         self.network_stats.consecutive_failures = 0;
-        
+
         // Add latency sample
         self.network_stats.latency_samples.push_back(latency_ms);
         if self.network_stats.latency_samples.len() > MAX_LATENCY_SAMPLES {
             self.network_stats.latency_samples.pop_front();
         }
-        
+
         // Recalculate average latency
         let sum: u64 = self.network_stats.latency_samples.iter().sum();
         self.network_stats.avg_latency_ms = sum / self.network_stats.latency_samples.len() as u64;
-        
+
         // Update tracked message status
-        if let Some(msg) = self.tracked_messages.iter_mut().find(|m| m.seq_num == seq_num) {
+        if let Some(msg) = self
+            .tracked_messages
+            .iter_mut()
+            .find(|m| m.seq_num == seq_num)
+        {
             msg.status = DeliveryStatus::Delivered;
         }
-        
+
         self.update_status();
     }
 
@@ -209,12 +213,16 @@ impl StatusMonitor {
     pub fn record_message_failed(&mut self, seq_num: u64) {
         self.network_stats.messages_failed += 1;
         self.network_stats.consecutive_failures += 1;
-        
+
         // Update tracked message status
-        if let Some(msg) = self.tracked_messages.iter_mut().find(|m| m.seq_num == seq_num) {
+        if let Some(msg) = self
+            .tracked_messages
+            .iter_mut()
+            .find(|m| m.seq_num == seq_num)
+        {
             msg.status = DeliveryStatus::Failed;
         }
-        
+
         self.update_status();
     }
 
@@ -222,27 +230,36 @@ impl StatusMonitor {
     pub fn record_message_timeout(&mut self, seq_num: u64) {
         self.network_stats.messages_failed += 1;
         self.network_stats.consecutive_failures += 1;
-        
+
         // Update tracked message status
-        if let Some(msg) = self.tracked_messages.iter_mut().find(|m| m.seq_num == seq_num) {
+        if let Some(msg) = self
+            .tracked_messages
+            .iter_mut()
+            .find(|m| m.seq_num == seq_num)
+        {
             msg.status = DeliveryStatus::Timeout;
         }
-        
+
         self.update_status();
     }
 
     /// Update mixnet connection status
-    pub fn update_mixnet_status(&mut self, connected: bool, estimated_hops: Option<u32>, anonymity_set_size: Option<u32>) {
+    pub fn update_mixnet_status(
+        &mut self,
+        connected: bool,
+        estimated_hops: Option<u32>,
+        anonymity_set_size: Option<u32>,
+    ) {
         self.mixnet_connected = connected;
-        
+
         if let Some(hops) = estimated_hops {
             self.network_stats.estimated_hops = hops;
         }
-        
+
         if let Some(anon_size) = anonymity_set_size {
             self.anonymity_set_size = anon_size;
         }
-        
+
         self.update_status();
     }
 
@@ -250,25 +267,27 @@ impl StatusMonitor {
     #[allow(dead_code)] // Part of complete message tracking API for future use
     pub fn check_message_timeouts(&mut self, timeout_duration: Duration) {
         let now = Instant::now();
-        
+
         for msg in &mut self.tracked_messages {
-            if (msg.status == DeliveryStatus::Sent || msg.status == DeliveryStatus::InTransit) && now.duration_since(msg.sent_at) > timeout_duration {
+            if (msg.status == DeliveryStatus::Sent || msg.status == DeliveryStatus::InTransit)
+                && now.duration_since(msg.sent_at) > timeout_duration
+            {
                 msg.status = DeliveryStatus::Timeout;
                 self.network_stats.messages_failed += 1;
                 self.network_stats.consecutive_failures += 1;
             }
         }
-        
+
         self.update_status();
     }
 
     /// Update overall connection health and privacy level assessment
     fn update_status(&mut self) {
         self.last_update = Instant::now();
-        
+
         // Assess connection health based on multiple factors
         self.connection_health = self.assess_connection_health();
-        
+
         // Assess privacy level based on mixnet status and connection health
         self.privacy_level = self.assess_privacy_level();
     }
@@ -278,7 +297,7 @@ impl StatusMonitor {
         let packet_loss = self.network_stats.packet_loss_percentage();
         let avg_latency = self.network_stats.avg_latency_ms;
         let consecutive_failures = self.network_stats.consecutive_failures;
-        
+
         // Health assessment based on multiple factors
         if consecutive_failures > 5 || packet_loss > 50.0 {
             ConnectionHealth::Critical
@@ -298,10 +317,10 @@ impl StatusMonitor {
         if !self.mixnet_connected {
             return PrivacyLevel::Compromised;
         }
-        
+
         // Consider message pacing as a factor in privacy assessment
         let has_pacing = self.pacing_info.enabled && self.pacing_info.interval_ms > 50;
-        
+
         match self.connection_health {
             ConnectionHealth::Critical => PrivacyLevel::Compromised,
             ConnectionHealth::Poor => PrivacyLevel::Degraded,
@@ -317,7 +336,7 @@ impl StatusMonitor {
                 } else {
                     PrivacyLevel::Degraded
                 }
-            },
+            }
             ConnectionHealth::Good => {
                 if self.network_stats.estimated_hops >= 3 && self.anonymity_set_size > 50 {
                     // Message pacing is needed for full protection
@@ -329,7 +348,7 @@ impl StatusMonitor {
                 } else {
                     PrivacyLevel::Protected
                 }
-            },
+            }
             ConnectionHealth::Excellent => {
                 if self.network_stats.estimated_hops >= 3 && self.anonymity_set_size > 100 {
                     // Message pacing is needed for full protection
@@ -341,7 +360,7 @@ impl StatusMonitor {
                 } else {
                     PrivacyLevel::Protected
                 }
-            },
+            }
         }
     }
 
@@ -374,31 +393,35 @@ impl StatusMonitor {
         self.pacing_info.interval_ms = interval_ms;
         self.pacing_info.jitter_ms = jitter_ms;
         self.pacing_info.last_update = Instant::now();
-        
+
         // Updating status potentially affects privacy level
         self.update_status();
     }
-    
+
     /// Get current message pacing status
     #[allow(dead_code)] // Part of complete monitoring API for future use
     pub fn get_pacing_status(&self) -> (bool, u64, u64) {
-        (self.pacing_info.enabled, self.pacing_info.interval_ms, self.pacing_info.jitter_ms)
+        (
+            self.pacing_info.enabled,
+            self.pacing_info.interval_ms,
+            self.pacing_info.jitter_ms,
+        )
     }
-    
+
     /// Get a colored status indicator for message pacing
     #[allow(dead_code)] // Part of complete monitoring API for future use
     pub fn pacing_indicator(&self) -> ColoredString {
         if self.pacing_info.enabled {
             match self.pacing_info.interval_ms {
-                0..=50 => "⏱️".yellow(),      // Minimal pacing
-                51..=150 => "⏱️".cyan(),     // Moderate pacing
-                _ => "⏱️".green(),           // Strong pacing
+                0..=50 => "⏱️".yellow(), // Minimal pacing
+                51..=150 => "⏱️".cyan(), // Moderate pacing
+                _ => "⏱️".green(),       // Strong pacing
             }
         } else {
-            "⏱️".red()                      // Disabled
+            "⏱️".red() // Disabled
         }
     }
-    
+
     /// Get human-readable description of current status
     pub fn status_description(&self) -> (String, String) {
         let health_desc = match self.connection_health {
@@ -421,9 +444,10 @@ impl StatusMonitor {
 
     /// Get pending message count (sent but not yet delivered)
     pub fn pending_message_count(&self) -> usize {
-        self.tracked_messages.iter().filter(|msg| {
-            matches!(msg.status, DeliveryStatus::Sent | DeliveryStatus::InTransit)
-        }).count()
+        self.tracked_messages
+            .iter()
+            .filter(|msg| matches!(msg.status, DeliveryStatus::Sent | DeliveryStatus::InTransit))
+            .count()
     }
 }
 

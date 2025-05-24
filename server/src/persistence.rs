@@ -1,5 +1,5 @@
-use anyhow::{Result, anyhow};
-use serde::{Serialize, Deserialize};
+use anyhow::{anyhow, Result};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -7,8 +7,8 @@ use tokio::fs;
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::game_protocol::{Player, Position};
 use crate::config::GameConfig;
+use crate::game_protocol::{Player, Position};
 
 /// Persistable game state structure that excludes sensitive runtime data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -90,9 +90,13 @@ impl GameStatePersistence {
 
         // Create persistence directory if it doesn't exist
         if !self.persist_dir.exists() {
-            fs::create_dir_all(&self.persist_dir).await
+            fs::create_dir_all(&self.persist_dir)
+                .await
                 .map_err(|e| anyhow!("Failed to create persistence directory: {}", e))?;
-            info!("Created persistence directory: {}", self.persist_dir.display());
+            info!(
+                "Created persistence directory: {}",
+                self.persist_dir.display()
+            );
         }
 
         // Validate directory permissions
@@ -102,7 +106,10 @@ impl GameStatePersistence {
                 if let Err(e) = fs::remove_file(&temp_file).await {
                     warn!("Failed to clean up test file: {}", e);
                 }
-                info!("Persistence directory is writable: {}", self.persist_dir.display());
+                info!(
+                    "Persistence directory is writable: {}",
+                    self.persist_dir.display()
+                );
                 Ok(())
             }
             Err(e) => Err(anyhow!("Persistence directory is not writable: {}", e)),
@@ -155,11 +162,13 @@ impl GameStatePersistence {
         let temp_file = self.get_temp_file_path();
         let final_file = self.get_state_file_path();
 
-        fs::write(&temp_file, serialized).await
+        fs::write(&temp_file, serialized)
+            .await
             .map_err(|e| anyhow!("Failed to write temporary state file: {}", e))?;
 
         // Atomic rename to final location
-        fs::rename(&temp_file, &final_file).await
+        fs::rename(&temp_file, &final_file)
+            .await
             .map_err(|e| anyhow!("Failed to finalize state file: {}", e))?;
 
         info!(
@@ -178,13 +187,14 @@ impl GameStatePersistence {
         }
 
         let state_file = self.get_state_file_path();
-        
+
         if !state_file.exists() {
             info!("No existing game state found");
             return Ok(None);
         }
 
-        let content = fs::read_to_string(&state_file).await
+        let content = fs::read_to_string(&state_file)
+            .await
             .map_err(|e| anyhow!("Failed to read state file: {}", e))?;
 
         let state: PersistedGameState = serde_json::from_str(&content)
@@ -219,13 +229,13 @@ impl GameStatePersistence {
             .as_secs();
 
         let initial_count = state.players.len();
-        
-        state.players.retain(|_id, player| {
-            now.saturating_sub(player.last_active) <= max_offline_duration
-        });
+
+        state
+            .players
+            .retain(|_id, player| now.saturating_sub(player.last_active) <= max_offline_duration);
 
         let removed_count = initial_count - state.players.len();
-        
+
         if removed_count > 0 {
             info!("Cleaned up {} stale players during recovery", removed_count);
         }
@@ -255,8 +265,9 @@ impl GameStatePersistence {
         }
 
         let backup_file = self.get_backup_file_path();
-        
-        fs::copy(&state_file, &backup_file).await
+
+        fs::copy(&state_file, &backup_file)
+            .await
             .map_err(|e| anyhow!("Failed to create backup: {}", e))?;
 
         info!("Created state backup: {}", backup_file.display());
@@ -277,17 +288,14 @@ impl GameStatePersistence {
             || config_snapshot.world_max_y != current_config.world_max_y
             || config_snapshot.world_min_y != current_config.world_min_y
         {
-            warn!(
-                "World boundaries changed since last save - players may need repositioning"
-            );
+            warn!("World boundaries changed since last save - players may need repositioning");
         }
 
         // Check if player health settings are compatible
         if config_snapshot.initial_player_health != current_config.initial_player_health {
             warn!(
                 "Player health configuration changed: saved={}, current={}",
-                config_snapshot.initial_player_health,
-                current_config.initial_player_health
+                config_snapshot.initial_player_health, current_config.initial_player_health
             );
         }
 
@@ -320,21 +328,22 @@ impl GameStatePersistence {
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-        self.persist_dir.join(format!("game_state_backup_{}.json", timestamp))
+        self.persist_dir
+            .join(format!("game_state_backup_{}.json", timestamp))
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::TempDir;
     use crate::game_protocol::Position;
+    use tempfile::TempDir;
 
     #[tokio::test]
     async fn test_persistence_initialization() {
         let temp_dir = TempDir::new().unwrap();
         let persistence = GameStatePersistence::new(temp_dir.path(), true);
-        
+
         assert!(persistence.initialize().await.is_ok());
         assert!(temp_dir.path().exists());
     }
@@ -347,7 +356,7 @@ mod tests {
 
         let config = GameConfig::default();
         let mut players = HashMap::new();
-        
+
         // Create a test player
         let player = Player {
             id: "player1".to_string(),
@@ -369,7 +378,7 @@ mod tests {
         let state = loaded_state.unwrap();
         assert_eq!(state.players.len(), 1);
         assert!(state.players.contains_key("player1"));
-        
+
         let loaded_player = &state.players["player1"];
         assert_eq!(loaded_player.name, "Test Player");
         assert_eq!(loaded_player.position.x, 10.0);
@@ -380,7 +389,7 @@ mod tests {
     async fn test_disabled_persistence() {
         let temp_dir = TempDir::new().unwrap();
         let persistence = GameStatePersistence::new(temp_dir.path(), false);
-        
+
         let config = GameConfig::default();
         let players = HashMap::new();
 
@@ -408,26 +417,32 @@ mod tests {
         };
 
         // Add fresh player
-        state.players.insert("fresh".to_string(), PersistedPlayer {
-            id: "fresh".to_string(),
-            display_id: "Fresh001".to_string(),
-            name: "Fresh Player".to_string(),
-            position: Position::new(0.0, 0.0),
-            health: 100,
-            last_attack_time: 0,
-            last_active: now,
-        });
+        state.players.insert(
+            "fresh".to_string(),
+            PersistedPlayer {
+                id: "fresh".to_string(),
+                display_id: "Fresh001".to_string(),
+                name: "Fresh Player".to_string(),
+                position: Position::new(0.0, 0.0),
+                health: 100,
+                last_attack_time: 0,
+                last_active: now,
+            },
+        );
 
         // Add stale player
-        state.players.insert("stale".to_string(), PersistedPlayer {
-            id: "stale".to_string(),
-            display_id: "Stale001".to_string(),
-            name: "Stale Player".to_string(),
-            position: Position::new(0.0, 0.0),
-            health: 100,
-            last_attack_time: 0,
-            last_active: now - 3600, // 1 hour ago
-        });
+        state.players.insert(
+            "stale".to_string(),
+            PersistedPlayer {
+                id: "stale".to_string(),
+                display_id: "Stale001".to_string(),
+                name: "Stale Player".to_string(),
+                position: Position::new(0.0, 0.0),
+                health: 100,
+                last_attack_time: 0,
+                last_active: now - 3600, // 1 hour ago
+            },
+        );
 
         let removed = persistence.cleanup_stale_players(&mut state, 1800); // 30 min threshold
         assert_eq!(removed, 1);

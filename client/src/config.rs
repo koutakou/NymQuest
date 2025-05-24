@@ -1,4 +1,4 @@
-use anyhow::{Result, anyhow};
+use anyhow::{anyhow, Result};
 use std::env;
 use std::time::Duration;
 use tracing::{info, warn};
@@ -61,248 +61,325 @@ impl ClientConfig {
     /// Load configuration with environment variable overrides and validation
     pub fn load() -> Result<Self> {
         let mut config = Self::default();
-        
+
         // Load environment overrides with validation
-        config.max_player_name_length = Self::load_env_usize("NYMQUEST_CLIENT_MAX_PLAYER_NAME_LENGTH", config.max_player_name_length)?;
-        config.max_chat_message_length = Self::load_env_usize("NYMQUEST_CLIENT_MAX_CHAT_MESSAGE_LENGTH", config.max_chat_message_length)?;
-        config.connection_timeout_ms = Self::load_env_u64("NYMQUEST_CLIENT_CONNECTION_TIMEOUT_MS", config.connection_timeout_ms)?;
-        config.initial_ack_timeout_ms = Self::load_env_u64("NYMQUEST_CLIENT_INITIAL_ACK_TIMEOUT_MS", config.initial_ack_timeout_ms)?;
-        config.subsequent_ack_timeout_ms = Self::load_env_u64("NYMQUEST_CLIENT_SUBSEQUENT_ACK_TIMEOUT_MS", config.subsequent_ack_timeout_ms)?;
-        config.max_retries = Self::load_env_usize("NYMQUEST_CLIENT_MAX_RETRIES", config.max_retries)?;
+        config.max_player_name_length = Self::load_env_usize(
+            "NYMQUEST_CLIENT_MAX_PLAYER_NAME_LENGTH",
+            config.max_player_name_length,
+        )?;
+        config.max_chat_message_length = Self::load_env_usize(
+            "NYMQUEST_CLIENT_MAX_CHAT_MESSAGE_LENGTH",
+            config.max_chat_message_length,
+        )?;
+        config.connection_timeout_ms = Self::load_env_u64(
+            "NYMQUEST_CLIENT_CONNECTION_TIMEOUT_MS",
+            config.connection_timeout_ms,
+        )?;
+        config.initial_ack_timeout_ms = Self::load_env_u64(
+            "NYMQUEST_CLIENT_INITIAL_ACK_TIMEOUT_MS",
+            config.initial_ack_timeout_ms,
+        )?;
+        config.subsequent_ack_timeout_ms = Self::load_env_u64(
+            "NYMQUEST_CLIENT_SUBSEQUENT_ACK_TIMEOUT_MS",
+            config.subsequent_ack_timeout_ms,
+        )?;
+        config.max_retries =
+            Self::load_env_usize("NYMQUEST_CLIENT_MAX_RETRIES", config.max_retries)?;
         config.max_fps = Self::load_env_u32("NYMQUEST_CLIENT_MAX_FPS", config.max_fps)?;
-        config.max_command_history = Self::load_env_usize("NYMQUEST_CLIENT_MAX_COMMAND_HISTORY", config.max_command_history)?;
-        config.max_chat_history = Self::load_env_usize("NYMQUEST_CLIENT_MAX_CHAT_HISTORY", config.max_chat_history)?;
+        config.max_command_history = Self::load_env_usize(
+            "NYMQUEST_CLIENT_MAX_COMMAND_HISTORY",
+            config.max_command_history,
+        )?;
+        config.max_chat_history =
+            Self::load_env_usize("NYMQUEST_CLIENT_MAX_CHAT_HISTORY", config.max_chat_history)?;
         config.debug_mode = Self::load_env_bool("NYMQUEST_CLIENT_DEBUG_MODE", config.debug_mode)?;
-        config.server_address_file = Self::load_env_string("NYMQUEST_CLIENT_SERVER_ADDRESS_FILE", config.server_address_file);
-        config.movement_speed = Self::load_env_f32("NYMQUEST_CLIENT_MOVEMENT_SPEED", config.movement_speed)?;
-        config.message_pacing_interval_ms = Self::load_env_u64("NYMQUEST_CLIENT_MESSAGE_PACING_INTERVAL_MS", config.message_pacing_interval_ms)?;
-        config.enable_message_pacing = Self::load_env_bool("NYMQUEST_CLIENT_ENABLE_MESSAGE_PACING", config.enable_message_pacing)?;
-        
+        config.server_address_file = Self::load_env_string(
+            "NYMQUEST_CLIENT_SERVER_ADDRESS_FILE",
+            config.server_address_file,
+        );
+        config.movement_speed =
+            Self::load_env_f32("NYMQUEST_CLIENT_MOVEMENT_SPEED", config.movement_speed)?;
+        config.message_pacing_interval_ms = Self::load_env_u64(
+            "NYMQUEST_CLIENT_MESSAGE_PACING_INTERVAL_MS",
+            config.message_pacing_interval_ms,
+        )?;
+        config.enable_message_pacing = Self::load_env_bool(
+            "NYMQUEST_CLIENT_ENABLE_MESSAGE_PACING",
+            config.enable_message_pacing,
+        )?;
+
         // Validate configuration
         config.validate()?;
-        
+
         info!("Client configuration loaded and validated");
-        info!("Network timeouts: {}ms connection, {}ms initial ack, {}ms subsequent ack", 
-              config.connection_timeout_ms, config.initial_ack_timeout_ms, config.subsequent_ack_timeout_ms);
-        info!("Limits: {} retries, {}fps, {} cmd history, {} chat history", 
-              config.max_retries, config.max_fps, config.max_command_history, config.max_chat_history);
-        info!("String limits: {} name length, {} chat length", 
-              config.max_player_name_length, config.max_chat_message_length);
+        info!(
+            "Network timeouts: {}ms connection, {}ms initial ack, {}ms subsequent ack",
+            config.connection_timeout_ms,
+            config.initial_ack_timeout_ms,
+            config.subsequent_ack_timeout_ms
+        );
+        info!(
+            "Limits: {} retries, {}fps, {} cmd history, {} chat history",
+            config.max_retries, config.max_fps, config.max_command_history, config.max_chat_history
+        );
+        info!(
+            "String limits: {} name length, {} chat length",
+            config.max_player_name_length, config.max_chat_message_length
+        );
         info!("Debug mode: {}", config.debug_mode);
         info!("Server address file: {}", config.server_address_file);
         info!("Movement speed: {}", config.movement_speed);
-        info!("Message pacing interval: {}ms", config.message_pacing_interval_ms);
+        info!(
+            "Message pacing interval: {}ms",
+            config.message_pacing_interval_ms
+        );
         info!("Enable message pacing: {}", config.enable_message_pacing);
-        
+
         Ok(config)
     }
-    
+
     /// Validate the configuration values for consistency and safety
     pub fn validate(&self) -> Result<()> {
         // Validate string lengths
         if self.max_player_name_length == 0 || self.max_player_name_length > 1000 {
-            return Err(anyhow!("Invalid max player name length: {} (must be 1-1000)", 
-                              self.max_player_name_length));
+            return Err(anyhow!(
+                "Invalid max player name length: {} (must be 1-1000)",
+                self.max_player_name_length
+            ));
         }
-        
+
         if self.max_chat_message_length == 0 || self.max_chat_message_length > 10000 {
-            return Err(anyhow!("Invalid max chat message length: {} (must be 1-10000)", 
-                              self.max_chat_message_length));
+            return Err(anyhow!(
+                "Invalid max chat message length: {} (must be 1-10000)",
+                self.max_chat_message_length
+            ));
         }
-        
+
         // Validate network timeouts
         if self.connection_timeout_ms == 0 || self.connection_timeout_ms > 300000 {
-            return Err(anyhow!("Invalid connection timeout: {} (must be 1-300000ms)", 
-                              self.connection_timeout_ms));
+            return Err(anyhow!(
+                "Invalid connection timeout: {} (must be 1-300000ms)",
+                self.connection_timeout_ms
+            ));
         }
-        
+
         if self.initial_ack_timeout_ms == 0 || self.initial_ack_timeout_ms > 60000 {
-            return Err(anyhow!("Invalid initial ack timeout: {} (must be 1-60000ms)", 
-                              self.initial_ack_timeout_ms));
+            return Err(anyhow!(
+                "Invalid initial ack timeout: {} (must be 1-60000ms)",
+                self.initial_ack_timeout_ms
+            ));
         }
-        
+
         if self.subsequent_ack_timeout_ms == 0 || self.subsequent_ack_timeout_ms > 60000 {
-            return Err(anyhow!("Invalid subsequent ack timeout: {} (must be 1-60000ms)", 
-                              self.subsequent_ack_timeout_ms));
+            return Err(anyhow!(
+                "Invalid subsequent ack timeout: {} (must be 1-60000ms)",
+                self.subsequent_ack_timeout_ms
+            ));
         }
-        
+
         if self.subsequent_ack_timeout_ms >= self.initial_ack_timeout_ms {
-            warn!("Subsequent ack timeout ({}) should be less than initial timeout ({})", 
-                  self.subsequent_ack_timeout_ms, self.initial_ack_timeout_ms);
+            warn!(
+                "Subsequent ack timeout ({}) should be less than initial timeout ({})",
+                self.subsequent_ack_timeout_ms, self.initial_ack_timeout_ms
+            );
         }
-        
+
         // Validate retry count
         if self.max_retries == 0 || self.max_retries > 10 {
-            return Err(anyhow!("Invalid max retries: {} (must be 1-10)", self.max_retries));
+            return Err(anyhow!(
+                "Invalid max retries: {} (must be 1-10)",
+                self.max_retries
+            ));
         }
-        
+
         // Validate FPS
         if self.max_fps == 0 || self.max_fps > 144 {
             return Err(anyhow!("Invalid max FPS: {} (must be 1-144)", self.max_fps));
         }
-        
+
         if self.max_fps > 60 {
-            warn!("High FPS setting ({}) may consume more CPU resources", self.max_fps);
+            warn!(
+                "High FPS setting ({}) may consume more CPU resources",
+                self.max_fps
+            );
         }
-        
+
         // Validate history limits
         if self.max_command_history == 0 || self.max_command_history > 10000 {
-            return Err(anyhow!("Invalid max command history: {} (must be 1-10000)", 
-                              self.max_command_history));
+            return Err(anyhow!(
+                "Invalid max command history: {} (must be 1-10000)",
+                self.max_command_history
+            ));
         }
-        
+
         if self.max_chat_history == 0 || self.max_chat_history > 10000 {
-            return Err(anyhow!("Invalid max chat history: {} (must be 1-10000)", 
-                              self.max_chat_history));
+            return Err(anyhow!(
+                "Invalid max chat history: {} (must be 1-10000)",
+                self.max_chat_history
+            ));
         }
-        
+
         // Validate movement speed
         if self.movement_speed <= 0.0 {
-            return Err(anyhow!("Invalid movement speed: {} (must be greater than 0)", self.movement_speed));
+            return Err(anyhow!(
+                "Invalid movement speed: {} (must be greater than 0)",
+                self.movement_speed
+            ));
         }
-        
+
         // Validate message pacing interval
         if self.message_pacing_interval_ms == 0 || self.message_pacing_interval_ms > 10000 {
-            return Err(anyhow!("Invalid message pacing interval: {} (must be 1-10000ms)", 
-                              self.message_pacing_interval_ms));
+            return Err(anyhow!(
+                "Invalid message pacing interval: {} (must be 1-10000ms)",
+                self.message_pacing_interval_ms
+            ));
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate player name according to configuration
     #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn validate_player_name(&self, name: &str) -> Result<()> {
         if name.is_empty() {
             return Err(anyhow!("Player name cannot be empty"));
         }
-        
+
         if name.len() > self.max_player_name_length {
-            return Err(anyhow!("Player name too long: {} characters (max: {})", 
-                              name.len(), self.max_player_name_length));
+            return Err(anyhow!(
+                "Player name too long: {} characters (max: {})",
+                name.len(),
+                self.max_player_name_length
+            ));
         }
-        
+
         // Check for invalid characters (control characters, etc.)
         if name.chars().any(|c| c.is_control()) {
             return Err(anyhow!("Player name contains invalid characters"));
         }
-        
+
         // Check for excessive whitespace
         if name.trim().is_empty() {
             return Err(anyhow!("Player name cannot be only whitespace"));
         }
-        
+
         if name.trim().len() != name.len() {
-            return Err(anyhow!("Player name cannot have leading or trailing whitespace"));
+            return Err(anyhow!(
+                "Player name cannot have leading or trailing whitespace"
+            ));
         }
-        
+
         Ok(())
     }
-    
+
     /// Validate chat message according to configuration
     #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn validate_chat_message(&self, message: &str) -> Result<()> {
         if message.is_empty() {
             return Err(anyhow!("Chat message cannot be empty"));
         }
-        
+
         if message.len() > self.max_chat_message_length {
-            return Err(anyhow!("Chat message too long: {} characters (max: {})", 
-                              message.len(), self.max_chat_message_length));
+            return Err(anyhow!(
+                "Chat message too long: {} characters (max: {})",
+                message.len(),
+                self.max_chat_message_length
+            ));
         }
-        
+
         // Check for excessive control characters (allow newlines in chat)
-        let control_count = message.chars().filter(|c| c.is_control() && *c != '\n' && *c != '\t').count();
+        let control_count = message
+            .chars()
+            .filter(|c| c.is_control() && *c != '\n' && *c != '\t')
+            .count();
         if control_count > 0 {
             return Err(anyhow!("Chat message contains invalid characters"));
         }
-        
+
         // Check for excessive whitespace
         if message.trim().is_empty() {
             return Err(anyhow!("Chat message cannot be only whitespace"));
         }
-        
+
         Ok(())
     }
-    
+
     /// Get connection timeout as Duration
     #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn connection_timeout(&self) -> Duration {
         Duration::from_millis(self.connection_timeout_ms)
     }
-    
+
     /// Get initial ack timeout as Duration
     #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn initial_ack_timeout(&self) -> Duration {
         Duration::from_millis(self.initial_ack_timeout_ms)
     }
-    
+
     /// Get subsequent ack timeout as Duration
     #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn subsequent_ack_timeout(&self) -> Duration {
         Duration::from_millis(self.subsequent_ack_timeout_ms)
     }
-    
+
     /// Get frame duration for FPS limiting
     #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn frame_duration(&self) -> Duration {
         Duration::from_millis(1000 / self.max_fps as u64)
     }
-    
+
     // Helper functions for loading environment variables with validation
     fn load_env_u64(var_name: &str, default: u64) -> Result<u64> {
         match env::var(var_name) {
-            Ok(val) => {
-                val.parse::<u64>()
-                    .map_err(|e| anyhow!("Invalid u64 value for {}: {} ({})", var_name, val, e))
-            },
+            Ok(val) => val
+                .parse::<u64>()
+                .map_err(|e| anyhow!("Invalid u64 value for {}: {} ({})", var_name, val, e)),
             Err(_) => Ok(default),
         }
     }
-    
+
     fn load_env_u32(var_name: &str, default: u32) -> Result<u32> {
         match env::var(var_name) {
-            Ok(val) => {
-                val.parse::<u32>()
-                    .map_err(|e| anyhow!("Invalid u32 value for {}: {} ({})", var_name, val, e))
-            },
+            Ok(val) => val
+                .parse::<u32>()
+                .map_err(|e| anyhow!("Invalid u32 value for {}: {} ({})", var_name, val, e)),
             Err(_) => Ok(default),
         }
     }
-    
+
     fn load_env_usize(var_name: &str, default: usize) -> Result<usize> {
         match env::var(var_name) {
-            Ok(val) => {
-                val.parse::<usize>()
-                    .map_err(|e| anyhow!("Invalid usize value for {}: {} ({})", var_name, val, e))
-            },
+            Ok(val) => val
+                .parse::<usize>()
+                .map_err(|e| anyhow!("Invalid usize value for {}: {} ({})", var_name, val, e)),
             Err(_) => Ok(default),
         }
     }
-    
+
     fn load_env_bool(var_name: &str, default: bool) -> Result<bool> {
         match env::var(var_name) {
-            Ok(val) => {
-                match val.to_lowercase().as_str() {
-                    "true" | "1" | "yes" | "on" => Ok(true),
-                    "false" | "0" | "no" | "off" => Ok(false),
-                    _ => Err(anyhow!("Invalid boolean value for {}: {} (use true/false, 1/0, yes/no, on/off)", var_name, val)),
-                }
+            Ok(val) => match val.to_lowercase().as_str() {
+                "true" | "1" | "yes" | "on" => Ok(true),
+                "false" | "0" | "no" | "off" => Ok(false),
+                _ => Err(anyhow!(
+                    "Invalid boolean value for {}: {} (use true/false, 1/0, yes/no, on/off)",
+                    var_name,
+                    val
+                )),
             },
             Err(_) => Ok(default),
         }
     }
-    
+
     fn load_env_string(var_name: &str, default: String) -> String {
         env::var(var_name).unwrap_or(default)
     }
-    
+
     fn load_env_f32(var_name: &str, default: f32) -> Result<f32> {
         match env::var(var_name) {
-            Ok(val) => {
-                val.parse()
-                    .map_err(|e| anyhow!("Invalid f32 value for {}: {} ({})", var_name, val, e))
-            },
+            Ok(val) => val
+                .parse()
+                .map_err(|e| anyhow!("Invalid f32 value for {}: {} ({})", var_name, val, e)),
             Err(_) => Ok(default),
         }
     }
@@ -311,22 +388,22 @@ impl ClientConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_default_config_validation() {
         let config = ClientConfig::default();
         assert!(config.validate().is_ok());
     }
-    
+
     #[test]
     fn test_player_name_validation() {
         let config = ClientConfig::default();
-        
+
         // Valid names
         assert!(config.validate_player_name("Alice").is_ok());
         assert!(config.validate_player_name("Player123").is_ok());
         assert!(config.validate_player_name("Test User").is_ok());
-        
+
         // Invalid names
         assert!(config.validate_player_name("").is_err());
         assert!(config.validate_player_name("   ").is_err());
@@ -334,21 +411,21 @@ mod tests {
         assert!(config.validate_player_name("Alice ").is_err());
         assert!(config.validate_player_name(&"a".repeat(1000)).is_err());
     }
-    
+
     #[test]
     fn test_chat_message_validation() {
         let config = ClientConfig::default();
-        
+
         // Valid messages
         assert!(config.validate_chat_message("Hello world!").is_ok());
         assert!(config.validate_chat_message("Multi\nline\nmessage").is_ok());
-        
+
         // Invalid messages
         assert!(config.validate_chat_message("").is_err());
         assert!(config.validate_chat_message("   ").is_err());
         assert!(config.validate_chat_message(&"a".repeat(10000)).is_err());
     }
-    
+
     #[test]
     fn test_timeout_durations() {
         let config = ClientConfig::default();

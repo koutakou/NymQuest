@@ -1,19 +1,22 @@
 #![allow(clippy::clone_on_copy)]
 
 use anyhow::Result;
-use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender};
-use std::sync::{Arc, Mutex};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
-use std::collections::HashMap;
+use nym_sdk::mixnet::{AnonymousSenderTag, MixnetClient, MixnetMessageSender};
 use rand::{thread_rng, Rng};
-use tracing::{info, warn, error, debug, trace};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{debug, error, info, trace, warn};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
-use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, WorldBoundaries, EmoteType, ProtocolVersion};
-use crate::game_state::GameState;
 use crate::config::GameConfig;
+use crate::game_protocol::{
+    ClientMessage, ClientMessageType, Direction, EmoteType, Position, ProtocolVersion,
+    ServerMessage, WorldBoundaries,
+};
+use crate::game_state::GameState;
 
 /// Token bucket rate limiter for DoS protection
 /// Tracks rate limits per connection to prevent spam while preserving privacy
@@ -34,11 +37,11 @@ impl TokenBucket {
             last_refill: SystemTime::now(),
         }
     }
-    
+
     /// Attempt to consume a token, returns true if successful
     fn try_consume(&mut self) -> bool {
         self.refill_tokens();
-        
+
         if self.tokens >= 1.0 {
             self.tokens -= 1.0;
             true
@@ -46,7 +49,7 @@ impl TokenBucket {
             false
         }
     }
-    
+
     /// Refill tokens based on elapsed time
     fn refill_tokens(&mut self) {
         let now = SystemTime::now();
@@ -76,22 +79,24 @@ impl RateLimiter {
             refill_rate: config.message_rate_limit,
         }
     }
-    
+
     /// Check if a message from this connection should be allowed
     /// Returns true if allowed, false if rate limited
     fn check_rate_limit(&mut self, connection_id: &str) -> bool {
-        let bucket = self.buckets.entry(connection_id.to_string())
+        let bucket = self
+            .buckets
+            .entry(connection_id.to_string())
             .or_insert_with(|| TokenBucket::new(self.max_tokens, self.refill_rate));
-        
+
         bucket.try_consume()
     }
-    
+
     /// Clean up old buckets to prevent memory leaks
     /// This should be called periodically
     fn cleanup_old_buckets(&mut self) {
         const CLEANUP_THRESHOLD_SECS: u64 = 300; // 5 minutes
         let now = SystemTime::now();
-        
+
         self.buckets.retain(|_, bucket| {
             if let Ok(elapsed) = now.duration_since(bucket.last_refill) {
                 elapsed.as_secs() < CLEANUP_THRESHOLD_SECS
@@ -130,7 +135,7 @@ struct ReplayProtectionWindow {
     // Highest sequence number seen so far
     highest_seq: u64,
     // Bitmap window to track received sequence numbers below the highest
-    // Each bit represents whether we've seen (highest_seq - bit_position) 
+    // Each bit represents whether we've seen (highest_seq - bit_position)
     window: u128,
     // Window size - how many previous sequence numbers we track
     window_size: u8,
@@ -147,7 +152,7 @@ impl ReplayProtectionWindow {
             window_size,
         }
     }
-    
+
     // Process a sequence number and determine if it's a replay
     // Returns true if the message is a replay, false if it's new
     fn process(&mut self, seq_num: u64) -> bool {
@@ -157,12 +162,12 @@ impl ReplayProtectionWindow {
             self.window = 1; // Mark the first sequence number as seen (bit 0)
             return false; // Not a replay
         }
-        
+
         // If the sequence number is higher than what we've seen, it's definitely not a replay
         if seq_num > self.highest_seq {
             // Calculate how much the window needs to slide
             let shift = std::cmp::min((seq_num - self.highest_seq) as u8, self.window_size);
-            
+
             // Shift the window to accommodate the new highest sequence number
             self.window = if shift >= 128 {
                 // If shift is >= 128, all bits will be shifted out, so clear the window
@@ -170,11 +175,11 @@ impl ReplayProtectionWindow {
             } else {
                 self.window << shift
             };
-            
+
             // Update the highest sequence number after shifting the window
             let old_highest = self.highest_seq;
             self.highest_seq = seq_num;
-            
+
             // For security, we need to mark all sequence numbers between old_highest and new highest
             // that would fall within our window as "seen" to prevent replay attacks in that range
             if seq_num - old_highest <= self.window_size as u64 {
@@ -184,35 +189,35 @@ impl ReplayProtectionWindow {
                     self.window |= 1u128 << (shift - i);
                 }
             }
-            
+
             // Mark the new highest sequence number as seen (bit 0 represents highest_seq)
             self.window |= 1;
-            
+
             return false; // Not a replay
         }
-        
+
         // If the sequence number is the same as highest, it's a replay
         if seq_num == self.highest_seq {
             return true; // Replay
         }
-        
+
         // Check if the sequence number is within our window
         let offset = self.highest_seq - seq_num;
-        
+
         // If it's too old (outside our window), we consider it a replay for safety
         if offset as u8 > self.window_size {
             return true; // Too old, consider it a replay
         }
-        
+
         // Check if we've already seen this sequence number
         let mask = 1u128 << (offset as u8);
         if (self.window & mask) != 0 {
             return true; // Already seen, it's a replay
         }
-        
+
         // Mark this sequence number as seen
         self.window |= mask;
-        
+
         false // Not a replay
     }
 }
@@ -232,10 +237,10 @@ fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
                 // Window size of 64 means we track the last 64 sequence numbers
                 ReplayProtectionWindow::new(64)
             });
-            
+
             // Check and update the window
             window.process(seq_num)
-        },
+        }
         Err(e) => {
             error!("Warning: Failed to access replay protection data: {}", e);
             // In case of mutex poisoning, err on the side of caution and allow the message
@@ -251,55 +256,58 @@ async fn send_ack(
     sender_tag: &AnonymousSenderTag,
     seq_num: u64,
     msg_type: ClientMessageType,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     // Create acknowledgment
     let ack = ServerMessage::Ack {
         client_seq_num: seq_num,
         original_type: msg_type,
     };
-    
+
     // Create an authenticated acknowledgment message
     let authenticated_ack = AuthenticatedMessage::new(ack, auth_key)?;
-    
+
     // Serialize and send the authenticated acknowledgment
     let ack_json = serde_json::to_string(&authenticated_ack)?;
     client.send_reply(sender_tag.clone(), ack_json).await?;
-    
+
     Ok(())
 }
 
 /// Broadcast a server shutdown notification to all connected players
 pub async fn broadcast_shutdown_notification(
-    client: &MixnetClient, 
+    client: &MixnetClient,
     game_state: &Arc<GameState>,
     message: &str,
     shutdown_in_seconds: u8,
-    _auth_key: &AuthKey
+    _auth_key: &AuthKey,
 ) -> Result<()> {
     // Get all connected players
     let player_tags = game_state.get_player_tags();
-    info!("Broadcasting shutdown notification to {} players", player_tags.len());
-    
+    info!(
+        "Broadcasting shutdown notification to {} players",
+        player_tags.len()
+    );
+
     // Get next sequence number for the message
     let seq_num = next_seq_num();
-    
+
     // Create shutdown message with the warning time
     let shutdown_msg = ServerMessage::ServerShutdown {
         message: message.to_string(),
         seq_num,
         shutdown_in_seconds,
     };
-    
+
     let message_json = serde_json::to_string(&shutdown_msg)?;
-    
+
     // Broadcast to all players
     for tag in player_tags {
         if let Err(e) = client.send_reply(tag.clone(), message_json.clone()).await {
             warn!("Failed to send shutdown notification to a player: {}", e);
         }
     }
-    
+
     info!("Shutdown notification sent to all players");
     Ok(())
 }
@@ -310,27 +318,27 @@ pub async fn broadcast_game_state(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
     exclude_tag: Option<AnonymousSenderTag>,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     // Get the current game state
     let players = game_state.get_players();
-    
+
     // Create the game state message
     let game_state_message = ServerMessage::GameState {
         players,
         seq_num: next_seq_num(),
     };
-    
+
     // Create an authenticated message with HMAC
     let authenticated_message = AuthenticatedMessage::new(game_state_message, auth_key)?;
     let serialized = serde_json::to_string(&authenticated_message)?;
-    
+
     // Get a copy of all active connections
     let connections = game_state.get_connections();
-    
+
     // Keep track of players we failed to send messages to
     let mut failed_tags = Vec::new();
-    
+
     // Send state update to each connected player
     for (player_id, tag) in connections {
         // Skip excluded player if any
@@ -339,21 +347,21 @@ pub async fn broadcast_game_state(
                 continue;
             }
         }
-        
+
         // Send the update to this player and track failures
         if let Err(e) = client.send_reply(tag.clone(), serialized.clone()).await {
             error!("Failed to send game state to player {}: {}", player_id, e);
             failed_tags.push(tag);
         }
     }
-    
+
     // Clean up any players that we couldn't reach
     for tag in failed_tags {
         if let Some(player_id) = game_state.remove_player(&tag) {
             info!("Removed unreachable player: {}", player_id);
         }
     }
-    
+
     Ok(())
 }
 
@@ -367,8 +375,10 @@ lazy_static::lazy_static! {
 pub fn init_rate_limiter(config: &GameConfig) {
     let mut limiter = GLOBAL_RATE_LIMITER.lock().unwrap();
     *limiter = Some(RateLimiter::new(config));
-    info!("Rate limiter initialized: {:.1} msg/sec, burst: {}", 
-          config.message_rate_limit, config.message_burst_size);
+    info!(
+        "Rate limiter initialized: {:.1} msg/sec, burst: {}",
+        config.message_rate_limit, config.message_burst_size
+    );
 }
 
 /// Clean up old rate limiting buckets
@@ -387,7 +397,7 @@ pub async fn handle_client_message(
     game_state: &Arc<GameState>,
     message: ClientMessage,
     sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     // Check rate limit
     let should_rate_limit = if let Ok(mut limiter_guard) = GLOBAL_RATE_LIMITER.lock() {
@@ -399,59 +409,68 @@ pub async fn handle_client_message(
     } else {
         false
     };
-    
+
     if should_rate_limit {
         warn!("Rate limit exceeded for connection {}", sender_tag);
-        
+
         // Send rate limit error to client
-        let error_msg = ServerMessage::Error { 
+        let error_msg = ServerMessage::Error {
             message: "Rate limit exceeded. Please slow down your message frequency.".to_string(),
-            seq_num: next_seq_num()
+            seq_num: next_seq_num(),
         };
         let authenticated_response = AuthenticatedMessage::new(error_msg, auth_key)?;
         let response_str = serde_json::to_string(&authenticated_response)?;
-        
+
         // Send reply to the rate-limited client
         let _ = client.send_reply(sender_tag.clone(), response_str).await;
-        
+
         return Ok(());
     }
-    
+
     // Get sequence number for replay protection and acknowledgments
     let seq_num = message.get_seq_num();
-    
+
     // Handle acknowledgments separately and directly
     if let ClientMessage::Ack { .. } = &message {
         // We don't need to do anything with acks in this simple implementation
         // In a more complex system, we might track which messages were acknowledged
         return Ok(());
     }
-    
+
     // Check for message replay, but only for non-ack messages
     if is_message_replay(&sender_tag, seq_num) {
-        warn!("Detected replay attack or duplicate message: seq {} from {:?}", seq_num, sender_tag);
+        warn!(
+            "Detected replay attack or duplicate message: seq {} from {:?}",
+            seq_num, sender_tag
+        );
         return Ok(());
     }
-    
+
     // Send acknowledgment first for all non-ack messages
     send_ack(client, &sender_tag, seq_num, message.get_type(), auth_key).await?;
-    
+
     // Process the message based on its type
     match message {
-        ClientMessage::Register { name, seq_num: _, protocol_version } => {
+        ClientMessage::Register {
+            name,
+            seq_num: _,
+            protocol_version,
+        } => {
             // First, check protocol version compatibility
             let server_version = ProtocolVersion::default();
             let negotiated_version = match server_version.negotiate_with(&protocol_version) {
                 Some(version) => {
-                    info!("Protocol version negotiated: v{} (client: v{}, server: v{})", 
-                          version, protocol_version.current, server_version.current);
+                    info!(
+                        "Protocol version negotiated: v{} (client: v{}, server: v{})",
+                        version, protocol_version.current, server_version.current
+                    );
                     version
-                },
+                }
                 None => {
                     error!("Protocol version incompatible: client v{} (min: v{}), server v{} (min: v{})",
                            protocol_version.current, protocol_version.min_supported,
                            server_version.current, server_version.min_supported);
-                    
+
                     // Send error message for incompatible version
                     let error_msg = ServerMessage::Error {
                         message: format!("Protocol version incompatible. Server supports v{}-v{}, client requested v{}-v{}",
@@ -459,11 +478,11 @@ pub async fn handle_client_message(
                                        protocol_version.min_supported, protocol_version.current),
                         seq_num: next_seq_num(),
                     };
-                    
+
                     let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
                     let error_json = serde_json::to_string(&authenticated_error)?;
                     client.send_reply(sender_tag.clone(), error_json).await?;
-                    
+
                     return Ok(());
                 }
             };
@@ -475,17 +494,17 @@ pub async fn handle_client_message(
                     message: format!("Player {} is already registered", existing_player_id),
                     seq_num: next_seq_num(),
                 };
-                
+
                 let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
                 let error_json = serde_json::to_string(&authenticated_error)?;
-                
+
                 client.send_reply(sender_tag.clone(), error_json).await?;
                 return Ok(());
             }
-            
+
             // Register the new player
             let player_id = game_state.add_player(name, sender_tag);
-            
+
             // Create a successful registration response with negotiated version
             let register_ack = ServerMessage::RegisterAck {
                 player_id: player_id.clone(),
@@ -493,55 +512,74 @@ pub async fn handle_client_message(
                 world_boundaries: WorldBoundaries::from_config(game_state.get_config()),
                 negotiated_version,
             };
-            
+
             let authenticated_ack = AuthenticatedMessage::new(register_ack, auth_key)?;
             let register_ack_json = serde_json::to_string(&authenticated_ack)?;
-            
+
             // Send the registration confirmation to the new player
-            client.send_reply(sender_tag.clone(), register_ack_json).await?;
-            
+            client
+                .send_reply(sender_tag.clone(), register_ack_json)
+                .await?;
+
             // Broadcast updated game state to all players
             broadcast_game_state(client, game_state, None, auth_key).await?;
-            
-            info!("New player registered: {} (protocol v{})", player_id, negotiated_version);
+
+            info!(
+                "New player registered: {} (protocol v{})",
+                player_id, negotiated_version
+            );
             Ok(())
-        },
+        }
         ClientMessage::Move { direction, .. } => {
             handle_move(client, game_state, direction, sender_tag, auth_key).await
-        },
-        ClientMessage::Attack { target_display_id, .. } => {
-            handle_attack(client, game_state, target_display_id, sender_tag, auth_key).await
-        },
+        }
+        ClientMessage::Attack {
+            target_display_id, ..
+        } => handle_attack(client, game_state, target_display_id, sender_tag, auth_key).await,
         ClientMessage::Chat { message, .. } => {
             handle_chat(client, game_state, message, sender_tag, auth_key).await
-        },
+        }
         ClientMessage::Emote { emote_type, .. } => {
             handle_emote(client, game_state, emote_type, sender_tag, auth_key).await
-        },
+        }
         ClientMessage::Disconnect { seq_num } => {
             debug!("Processing disconnect message with seq_num: {}", seq_num);
-            
+
             // Send acknowledgment first
-            send_ack(client, &sender_tag, seq_num, ClientMessageType::Disconnect, auth_key).await?;
-            
+            send_ack(
+                client,
+                &sender_tag,
+                seq_num,
+                ClientMessageType::Disconnect,
+                auth_key,
+            )
+            .await?;
+
             // Handle the disconnection
             handle_disconnect(client, game_state, sender_tag, auth_key).await?;
             Ok(())
-        },
+        }
         ClientMessage::Heartbeat { seq_num } => {
             debug!("Processing heartbeat message with seq_num: {}", seq_num);
-            
+
             // Send acknowledgment first
-            send_ack(client, &sender_tag, seq_num, ClientMessageType::Heartbeat, auth_key).await?;
-            
+            send_ack(
+                client,
+                &sender_tag,
+                seq_num,
+                ClientMessageType::Heartbeat,
+                auth_key,
+            )
+            .await?;
+
             // Update the heartbeat timestamp
             handle_heartbeat(client, game_state, sender_tag, auth_key).await?;
             Ok(())
-        },
+        }
         ClientMessage::Ack { .. } => {
             // Already handled above
             Ok(())
-        },
+        }
     }
 }
 
@@ -551,7 +589,7 @@ async fn handle_move(
     game_state: &Arc<GameState>,
     direction: Direction,
     sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     // Find the player ID from sender tag
     if let Some(player_id) = game_state.get_player_id(&sender_tag) {
@@ -559,46 +597,51 @@ async fn handle_move(
         if let Some(player) = game_state.get_player(&player_id) {
             // Calculate movement vector
             let (dx, dy) = direction.to_vector();
-            
+
             // Calculate speed needed to move exactly one cell in the mini-map
             // The mini-map is 15x15 with world boundaries of -100 to 100, so each cell represents about 14 units
             let mini_map_cell_size = 14.0;
-            
+
             // Apply movement vector to get new position
             let mut new_position = Position {
                 x: player.position.x + dx * mini_map_cell_size,
                 y: player.position.y + dy * mini_map_cell_size,
             };
-            
+
             // Ensure the position stays within world boundaries
             let config = game_state.get_config();
             let (clamped_x, clamped_y) = config.clamp_position(new_position.x, new_position.y);
             new_position.x = clamped_x;
             new_position.y = clamped_y;
-            
+
             // Try to update position
             if game_state.update_player_position(&player_id, new_position) {
                 // Movement was successful
                 // Provide immediate feedback to the player who moved
-                let move_confirm = ServerMessage::Event { 
-                    message: format!("Moved {:?} to position ({:.1}, {:.1})", direction, new_position.x, new_position.y),
-                    seq_num: next_seq_num()
+                let move_confirm = ServerMessage::Event {
+                    message: format!(
+                        "Moved {:?} to position ({:.1}, {:.1})",
+                        direction, new_position.x, new_position.y
+                    ),
+                    seq_num: next_seq_num(),
                 };
-                
+
                 // Create an authenticated message
                 let authenticated_confirm = AuthenticatedMessage::new(move_confirm, auth_key)?;
                 let confirm_msg = serde_json::to_string(&authenticated_confirm)?;
                 client.send_reply(sender_tag.clone(), confirm_msg).await?;
-                
+
                 // Broadcast updated state to all players
                 broadcast_game_state(client, game_state, None, auth_key).await?
             } else {
                 // Movement failed (collision with another player or obstacle)
-                let error_msg = ServerMessage::Error { 
-                    message: "Cannot move to that position - there's an obstacle or another player there".to_string(),
-                    seq_num: next_seq_num()
+                let error_msg = ServerMessage::Error {
+                    message:
+                        "Cannot move to that position - there's an obstacle or another player there"
+                            .to_string(),
+                    seq_num: next_seq_num(),
                 };
-                
+
                 // Create an authenticated message
                 let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
                 let message = serde_json::to_string(&authenticated_error)?;
@@ -606,18 +649,18 @@ async fn handle_move(
             }
         } else {
             // Player not found
-            let error_msg = ServerMessage::Error { 
+            let error_msg = ServerMessage::Error {
                 message: "You need to register before moving".to_string(),
                 seq_num: next_seq_num(),
             };
-            
+
             // Create an authenticated message
             let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
             let message = serde_json::to_string(&authenticated_error)?;
             client.send_reply(sender_tag.clone(), message).await?;
         }
     }
-    
+
     Ok(())
 }
 
@@ -627,7 +670,7 @@ async fn handle_attack(
     game_state: &Arc<GameState>,
     target_display_id: String,
     sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     // Find the attacker ID from sender tag
     if let Some(attacker_id) = game_state.get_player_id(&sender_tag) {
@@ -636,7 +679,7 @@ async fn handle_attack(
             Some(id) => id,
             None => {
                 // Target display ID doesn't exist
-                let error = ServerMessage::Error { 
+                let error = ServerMessage::Error {
                     message: format!("Attack failed: Player '{}' not found.", target_display_id),
                     seq_num: next_seq_num(),
                 };
@@ -645,15 +688,18 @@ async fn handle_attack(
                 return Ok(());
             }
         };
-        
-        info!("Player {} attacking player with display ID {}", attacker_id, target_display_id);
-        
+
+        info!(
+            "Player {} attacking player with display ID {}",
+            attacker_id, target_display_id
+        );
+
         // Get current time
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_secs();
-            
+
         // Check if the player is on cooldown (using configuration)
         if !game_state.can_attack(&attacker_id, now) {
             // Get remaining cooldown time for better error message
@@ -661,30 +707,35 @@ async fn handle_attack(
                 Some(player) => {
                     let config = game_state.get_config();
                     let time_since_last = now.saturating_sub(player.last_attack_time);
-                    config.attack_cooldown_seconds.saturating_sub(time_since_last)
-                },
+                    config
+                        .attack_cooldown_seconds
+                        .saturating_sub(time_since_last)
+                }
                 None => 0,
             };
-            
+
             // Send an error message if on cooldown
-            let cooldown_msg = ServerMessage::Error { 
-                message: format!("Attack on cooldown! Wait {} more seconds.", remaining_cooldown),
+            let cooldown_msg = ServerMessage::Error {
+                message: format!(
+                    "Attack on cooldown! Wait {} more seconds.",
+                    remaining_cooldown
+                ),
                 seq_num: next_seq_num(),
             };
             let message = serde_json::to_string(&cooldown_msg)?;
             client.send_reply(sender_tag.clone(), message).await?;
             return Ok(());
         }
-        
+
         // Check if attacker and target are within range (using configuration)
         let attack_range = game_state.get_config().attack_range;
-        
+
         // Get attacker's position
         let attacker_pos = match game_state.get_player(&attacker_id) {
             Some(player) => player.position,
             None => {
                 // This shouldn't happen but handle it anyway
-                let error = ServerMessage::Error { 
+                let error = ServerMessage::Error {
                     message: "Attack failed: Unable to find your player.".to_string(),
                     seq_num: next_seq_num(),
                 };
@@ -693,13 +744,13 @@ async fn handle_attack(
                 return Ok(());
             }
         };
-        
+
         // Get target's position
         let target_pos = match game_state.get_player(&target_id) {
             Some(player) => player.position,
             None => {
                 // Target doesn't exist
-                let error = ServerMessage::Error { 
+                let error = ServerMessage::Error {
                     message: "Attack failed: Target does not exist.".to_string(),
                     seq_num: next_seq_num(),
                 };
@@ -708,30 +759,33 @@ async fn handle_attack(
                 return Ok(());
             }
         };
-        
+
         // Calculate distance between attacker and target
         let distance = attacker_pos.distance_to(&target_pos);
-        
+
         if distance > attack_range {
             // Target is out of range
-            let error = ServerMessage::Error { 
-                message: format!("Attack failed: Target is out of range ({:.1} > {:.1}).", distance, attack_range),
+            let error = ServerMessage::Error {
+                message: format!(
+                    "Attack failed: Target is out of range ({:.1} > {:.1}).",
+                    distance, attack_range
+                ),
                 seq_num: next_seq_num(),
             };
             let message = serde_json::to_string(&error)?;
             client.send_reply(sender_tag.clone(), message).await?;
             return Ok(());
         }
-        
+
         // Update the last attack time
         game_state.update_attack_time(&attacker_id, now);
-        
+
         // Get target player's name and sender tag for notification
         let (target_name, target_tag) = {
             let connections = game_state.get_connections();
             let mut target_name = "Unknown".to_string();
             let mut target_tag = None;
-            
+
             // Find the target's connection
             for (id, tag) in connections {
                 if id == target_id {
@@ -742,72 +796,85 @@ async fn handle_attack(
                     break;
                 }
             }
-            
+
             (target_name, target_tag)
         };
-        
+
         // Get attacker's name for the notification
-        let attacker_name = game_state.get_player(&attacker_id)
+        let attacker_name = game_state
+            .get_player(&attacker_id)
             .map(|p| p.name.clone())
             .unwrap_or("Unknown".to_string());
-        
+
         // Apply damage
         let config = game_state.get_config();
         let base_damage = config.base_damage;
         let crit_chance = config.crit_chance;
         let crit_multiplier = config.crit_multiplier;
-        
+
         // Calculate if this is a critical hit
         let mut rng = thread_rng();
         let is_critical = rng.gen::<f32>() < crit_chance;
-        
+
         // Calculate final damage
         let damage = if is_critical {
             (base_damage as f32 * crit_multiplier) as u32
         } else {
             base_damage
         };
-        
+
         // Apply damage and check if target was defeated
         let target_defeated = game_state.apply_damage(&target_id, damage);
-        
+
         // Send notification to the target
         if let Some(tag) = target_tag {
             // Create attack notification for target player
             let attack_notification = ServerMessage::Event {
-                message: format!("⚠️ You are being attacked by {}! You lost {} health points.", attacker_name, damage),
+                message: format!(
+                    "⚠️ You are being attacked by {}! You lost {} health points.",
+                    attacker_name, damage
+                ),
                 seq_num: next_seq_num(),
             };
             let notification_msg = serde_json::to_string(&attack_notification)?;
             client.send_reply(tag.clone(), notification_msg).await?;
         }
-        
+
         // Send notification to the attacker
         let attacker_notification = ServerMessage::Event {
             message: if target_defeated {
-                format!("You defeated {}{}", 
-                    target_name, 
-                    if is_critical { " with a critical hit!" } else { "!" })
+                format!(
+                    "You defeated {}{}",
+                    target_name,
+                    if is_critical {
+                        " with a critical hit!"
+                    } else {
+                        "!"
+                    }
+                )
             } else {
-                format!("You hit {} for {} damage{}", 
-                    target_name, 
-                    damage, 
-                    if is_critical { " (CRITICAL HIT!)" } else { "" })
+                format!(
+                    "You hit {} for {} damage{}",
+                    target_name,
+                    damage,
+                    if is_critical { " (CRITICAL HIT!)" } else { "" }
+                )
             },
             seq_num: next_seq_num(),
         };
-        
+
         // Create an authenticated message
-        let authenticated_notification = AuthenticatedMessage::new(attacker_notification, auth_key)?;
+        let authenticated_notification =
+            AuthenticatedMessage::new(attacker_notification, auth_key)?;
         let attacker_msg = serde_json::to_string(&authenticated_notification)?;
         client.send_reply(sender_tag.clone(), attacker_msg).await?;
-        
+
         // This event is now sent in the move handler itself, we don't need to send it again here
-        
+
         // Broadcast the updated game state to all players
         broadcast_game_state(client, game_state, None, auth_key).await?;
     }
-    
+
     Ok(())
 }
 
@@ -817,52 +884,63 @@ async fn handle_emote(
     game_state: &Arc<GameState>,
     emote_type: EmoteType,
     sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     // Find the player ID from sender tag
     if let Some(sender_id) = game_state.get_player_id(&sender_tag) {
         // Get the player's name
         if let Some(player) = game_state.get_player(&sender_id) {
             let sender_name = player.name.clone();
-            
+
             // Create the emote message to broadcast to other players
-            let emote_msg = format!("{} {} {}", emote_type.display_icon(), sender_name, emote_type.display_text());
-            
+            let emote_msg = format!(
+                "{} {} {}",
+                emote_type.display_icon(),
+                sender_name,
+                emote_type.display_text()
+            );
+
             // Create a chat-like message with the emote
             let chat_msg = ServerMessage::ChatMessage {
                 sender_name: "Emote".to_string(), // Special sender name for emotes
                 message: emote_msg,
                 seq_num: next_seq_num(),
             };
-            
+
             // Create an authenticated chat message
             let authenticated_chat = AuthenticatedMessage::new(chat_msg, auth_key)?;
             let serialized = serde_json::to_string(&authenticated_chat)?;
-            
+
             // Create confirmation message for the sender
             let confirm_msg = ServerMessage::Event {
                 message: format!("You {}", emote_type.display_text()),
                 seq_num: next_seq_num(),
             };
-            
+
             // Create an authenticated confirmation message
             let authenticated_confirm = AuthenticatedMessage::new(confirm_msg, auth_key)?;
             let confirm_serialized = serde_json::to_string(&authenticated_confirm)?;
-            
+
             // Send confirmation to the original sender
-            if let Err(e) = client.send_reply(sender_tag.clone(), confirm_serialized).await {
-                error!("Failed to send emote confirmation to sender {}: {}", sender_id, e);
+            if let Err(e) = client
+                .send_reply(sender_tag.clone(), confirm_serialized)
+                .await
+            {
+                error!(
+                    "Failed to send emote confirmation to sender {}: {}",
+                    sender_id, e
+                );
             } else {
                 debug!("Emote confirmation sent to sender {}", sender_id);
             }
-            
+
             // Get a copy of all active connections
             let connections = game_state.get_connections();
             debug!("Broadcasting emote to {} players", connections.len());
-            
+
             // Prepare exclude tag as bytes for more reliable comparison
             let exclude_bytes = sender_tag.to_string().into_bytes();
-            
+
             // Broadcast emote to all other players
             for (player_id, tag) in connections {
                 // Skip sending to the original sender by comparing the tag bytes
@@ -870,18 +948,21 @@ async fn handle_emote(
                     match client.send_reply(tag.clone(), serialized.clone()).await {
                         Ok(_) => {
                             trace!("Emote message sent to player {}", player_id);
-                        },
+                        }
                         Err(e) => {
-                            error!("Failed to send emote message to player {}: {}", player_id, e);
+                            error!(
+                                "Failed to send emote message to player {}: {}",
+                                player_id, e
+                            );
                         }
                     }
                 }
             }
-            
+
             info!("Emote from {}: {}", sender_name, emote_type.display_text());
         }
     }
-    
+
     Ok(())
 }
 
@@ -891,67 +972,70 @@ async fn handle_chat(
     game_state: &Arc<GameState>,
     message: String,
     sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     // Find the player ID from sender tag
     if let Some(sender_id) = game_state.get_player_id(&sender_tag) {
         // Get the player's name
         if let Some(player) = game_state.get_player(&sender_id) {
             let sender_name = player.name.clone();
-            
+
             // Create the chat message for other players
             let chat_msg = ServerMessage::ChatMessage {
                 sender_name: sender_name.clone(),
                 message: message.clone(),
                 seq_num: next_seq_num(),
             };
-            
+
             // Create an authenticated chat message
             let authenticated_chat = AuthenticatedMessage::new(chat_msg, auth_key)?;
             let serialized = serde_json::to_string(&authenticated_chat)?;
-            
+
             // Create confirmation message for the sender
             let confirm_msg = ServerMessage::Event {
                 message: format!("Your message has been sent: {}", message),
                 seq_num: next_seq_num(),
             };
-            
+
             // Create an authenticated confirmation message
             let authenticated_confirm = AuthenticatedMessage::new(confirm_msg, auth_key)?;
             let confirm_serialized = serde_json::to_string(&authenticated_confirm)?;
-            
+
             // Send confirmation to the original sender
-            if let Err(e) = client.send_reply(sender_tag.clone(), confirm_serialized).await {
+            if let Err(e) = client
+                .send_reply(sender_tag.clone(), confirm_serialized)
+                .await
+            {
                 error!("Failed to send confirmation to sender {}: {}", sender_id, e);
             } else {
                 info!("Confirmation sent to sender {}", sender_id);
             }
-            
+
             // Get a copy of all active connections
             let connections = game_state.get_connections();
             info!("Broadcasting chat to {} players", connections.len());
-            
+
             // Prepare exclude tag as bytes for more reliable comparison
             let exclude_bytes = sender_tag.to_string().into_bytes();
-            
+
             for (player_id, tag) in connections {
                 // Skip sending to the original sender by comparing the tag bytes
                 if tag.to_string().into_bytes() != exclude_bytes {
                     match client.send_reply(tag.clone(), serialized.clone()).await {
                         Ok(_) => {
                             info!("Chat message sent to player {}", player_id);
-                        },
+                        }
                         Err(e) => {
                             error!("Failed to send chat message to player {}: {}", player_id, e);
                         }
                     }
                 }
             }
-            
+
             info!("Chat message from {}: {}", sender_name, message);
         }
     }
-    
+
     Ok(())
 }
 
@@ -960,16 +1044,16 @@ async fn handle_disconnect(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
     sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     // Remove the player
     if let Some(player_id) = game_state.remove_player(&sender_tag) {
         info!("Player {} disconnected", player_id);
-        
+
         // Broadcast the updated game state to all remaining players
         broadcast_game_state(client, game_state, None, auth_key).await?;
     }
-    
+
     Ok(())
 }
 
@@ -978,18 +1062,18 @@ async fn handle_heartbeat(
     _client: &MixnetClient,
     game_state: &Arc<GameState>,
     sender_tag: AnonymousSenderTag,
-    _auth_key: &AuthKey
+    _auth_key: &AuthKey,
 ) -> Result<()> {
     // Find the player ID from sender tag
     if let Some(player_id) = game_state.get_player_id(&sender_tag) {
         // Update the heartbeat timestamp for this player
         game_state.update_heartbeat(&player_id);
-        
+
         debug!("Heartbeat received from player {}", player_id);
     } else {
         debug!("Received heartbeat from unregistered player");
     }
-    
+
     Ok(())
 }
 
@@ -997,34 +1081,40 @@ async fn handle_heartbeat(
 pub async fn send_heartbeat_requests(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     let connections = game_state.get_connections();
-    
+
     if connections.is_empty() {
         return Ok(());
     }
-    
+
     let heartbeat_request = ServerMessage::HeartbeatRequest {
         seq_num: next_seq_num(),
     };
-    
+
     let authenticated_request = AuthenticatedMessage::new(heartbeat_request, auth_key)?;
     let serialized = serde_json::to_string(&authenticated_request)?;
-    
-    debug!("Sending heartbeat requests to {} players", connections.len());
-    
+
+    debug!(
+        "Sending heartbeat requests to {} players",
+        connections.len()
+    );
+
     for (player_id, tag) in connections {
         match client.send_reply(tag.clone(), serialized.clone()).await {
             Ok(_) => {
                 trace!("Heartbeat request sent to player {}", player_id);
-            },
+            }
             Err(e) => {
-                warn!("Failed to send heartbeat request to player {}: {}", player_id, e);
+                warn!(
+                    "Failed to send heartbeat request to player {}: {}",
+                    player_id, e
+                );
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -1032,25 +1122,28 @@ pub async fn send_heartbeat_requests(
 pub async fn cleanup_inactive_players(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
-    auth_key: &AuthKey
+    auth_key: &AuthKey,
 ) -> Result<()> {
     let inactive_players = game_state.get_inactive_players();
-    
+
     if inactive_players.is_empty() {
         return Ok(());
     }
-    
-    info!("Found {} inactive players to remove", inactive_players.len());
-    
+
+    info!(
+        "Found {} inactive players to remove",
+        inactive_players.len()
+    );
+
     // Remove the inactive players
     let removed_players = game_state.remove_players_by_ids(&inactive_players);
-    
+
     if !removed_players.is_empty() {
         info!("Removed {} inactive players", removed_players.len());
-        
+
         // Broadcast updated game state to remaining players
         broadcast_game_state(client, game_state, None, auth_key).await?;
     }
-    
+
     Ok(())
 }

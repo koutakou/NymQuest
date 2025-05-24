@@ -53,17 +53,17 @@ impl Position {
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
-    
+
     // Add a movement vector to this position
     #[allow(dead_code)]
     pub fn apply_movement(&mut self, move_vector: (f32, f32), speed: f32) {
         self.x += move_vector.0 * speed;
         self.y += move_vector.1 * speed;
-        
+
         // Note: Boundary clamping is now handled by GameConfig::clamp_position
         // This allows for configurable world boundaries rather than hardcoded values
     }
-    
+
     // Calculate distance to another position
     pub fn distance_to(&self, other: &Position) -> f32 {
         let dx = self.x - other.x;
@@ -75,7 +75,7 @@ impl Position {
 // Player representation
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Player {
-    pub id: String,        // Internal server ID (UUID) - not exposed to other clients
+    pub id: String,         // Internal server ID (UUID) - not exposed to other clients
     pub display_id: String, // Public identifier for display (e.g., "Player1", "Player2")
     pub position: Position,
     pub health: u32,
@@ -100,25 +100,44 @@ pub enum ClientMessageType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
     // Message to register in the game with protocol version negotiation
-    Register { 
-        name: String, 
+    Register {
+        name: String,
         seq_num: u64,
         protocol_version: ProtocolVersion,
     },
     // Message to move in the game world
-    Move { direction: Direction, seq_num: u64 },
+    Move {
+        direction: Direction,
+        seq_num: u64,
+    },
     // Message to attack another player (using display_id for privacy)
-    Attack { target_display_id: String, seq_num: u64 },
+    Attack {
+        target_display_id: String,
+        seq_num: u64,
+    },
     // Message to send chat to all players
-    Chat { message: String, seq_num: u64 },
+    Chat {
+        message: String,
+        seq_num: u64,
+    },
     // Message to perform an emote
-    Emote { emote_type: EmoteType, seq_num: u64 },
+    Emote {
+        emote_type: EmoteType,
+        seq_num: u64,
+    },
     // Message to leave the game
-    Disconnect { seq_num: u64 },
+    Disconnect {
+        seq_num: u64,
+    },
     // Heartbeat message to keep the connection alive
-    Heartbeat { seq_num: u64 },
+    Heartbeat {
+        seq_num: u64,
+    },
     // Acknowledge receipt of a server message
-    Ack { server_seq_num: u64, original_type: ServerMessageType },
+    Ack {
+        server_seq_num: u64,
+        original_type: ServerMessageType,
+    },
 }
 
 // Type of server message (used for acknowledgements)
@@ -140,10 +159,14 @@ pub enum ServerMessageType {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
     // Server is shutting down, clients should disconnect
-    ServerShutdown { message: String, seq_num: u64, shutdown_in_seconds: u8 },
+    ServerShutdown {
+        message: String,
+        seq_num: u64,
+        shutdown_in_seconds: u8,
+    },
     // Confirms registration and provides the player ID with protocol version negotiation
-    RegisterAck { 
-        player_id: String, 
+    RegisterAck {
+        player_id: String,
         seq_num: u64,
         // World boundaries for client synchronization
         world_boundaries: WorldBoundaries,
@@ -151,25 +174,48 @@ pub enum ServerMessage {
         negotiated_version: u16,
     },
     // Game state update
-    GameState { 
+    GameState {
         players: HashMap<String, Player>,
         seq_num: u64,
         // We could add other game elements here
     },
     // Event notification (attack, etc.)
-    Event { message: String, seq_num: u64 },
+    Event {
+        message: String,
+        seq_num: u64,
+    },
     // Chat message from another player
-    ChatMessage { sender_name: String, message: String, seq_num: u64 },
+    ChatMessage {
+        sender_name: String,
+        message: String,
+        seq_num: u64,
+    },
     // Error message
-    Error { message: String, seq_num: u64 },
+    Error {
+        message: String,
+        seq_num: u64,
+    },
     // Heartbeat request
-    HeartbeatRequest { seq_num: u64 },
+    HeartbeatRequest {
+        seq_num: u64,
+    },
     // Acknowledge receipt of a client message
-    Ack { client_seq_num: u64, original_type: ClientMessageType },
+    Ack {
+        client_seq_num: u64,
+        original_type: ClientMessageType,
+    },
     // Player departed
-    PlayerLeft { display_id: String, seq_num: u64 },
+    PlayerLeft {
+        display_id: String,
+        seq_num: u64,
+    },
     // Player status update
-    PlayerUpdate { display_id: String, position: Position, health: u32, seq_num: u64 },
+    PlayerUpdate {
+        display_id: String,
+        position: Position,
+        health: u32,
+        seq_num: u64,
+    },
 }
 
 // Helper implementation for ServerMessage to get metadata easily
@@ -189,7 +235,7 @@ impl ServerMessage {
             ServerMessage::PlayerUpdate { .. } => ServerMessageType::PlayerUpdate,
         }
     }
-    
+
     #[allow(dead_code)]
     pub fn get_seq_num(&self) -> u64 {
         match self {
@@ -222,7 +268,7 @@ impl ClientMessage {
             ClientMessage::Ack { .. } => ClientMessageType::Ack,
         }
     }
-    
+
     // Get the sequence number
     pub fn get_seq_num(&self) -> u64 {
         match self {
@@ -257,19 +303,19 @@ impl Direction {
         // 1/sqrt(2) ≈ 0.7071 is the correct normalization factor for diagonal movement
         // This ensures that diagonal movement has the same speed as cardinal movement
         let diag = FRAC_1_SQRT_2;
-        
+
         match self {
             Direction::Up => (0.0, -1.0),
             Direction::Down => (0.0, 1.0),
             Direction::Left => (-1.0, 0.0),
             Direction::Right => (1.0, 0.0),
-            Direction::UpLeft => (-diag, -diag),    // Properly normalized diagonal vectors
+            Direction::UpLeft => (-diag, -diag), // Properly normalized diagonal vectors
             Direction::UpRight => (diag, -diag),
             Direction::DownLeft => (-diag, diag),
             Direction::DownRight => (diag, diag),
         }
     }
-    
+
     #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
@@ -303,20 +349,19 @@ impl WorldBoundaries {
         let clamped_y = y.clamp(self.min_y, self.max_y);
         (clamped_x, clamped_y)
     }
-    
+
     #[allow(dead_code)]
     pub fn is_position_valid(&self, x: f32, y: f32) -> bool {
-        x >= self.min_x && x <= self.max_x && 
-        y >= self.min_y && y <= self.max_y
+        x >= self.min_x && x <= self.max_x && y >= self.min_y && y <= self.max_y
     }
-    
+
     #[allow(dead_code)]
     pub fn clamp_position_mut(&self, position: &mut Position) {
         let (x, y) = self.clamp_position(position.x, position.y);
         position.x = x;
         position.y = y;
     }
-    
+
     /// Create WorldBoundaries from GameConfig
     pub fn from_config(config: &crate::config::GameConfig) -> Self {
         Self {
@@ -355,7 +400,7 @@ impl EmoteType {
             EmoteType::Clap => "claps hands",
         }
     }
-    
+
     // Get a visual representation of the emote for display
     pub fn display_icon(&self) -> &'static str {
         match self {
@@ -369,7 +414,7 @@ impl EmoteType {
             EmoteType::Clap => "👏",
         }
     }
-    
+
     #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
