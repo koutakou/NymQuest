@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::time::Duration;
+use std::f32::consts::FRAC_1_SQRT_2;
 
 /// Current protocol version - increment when making breaking changes
 pub const PROTOCOL_VERSION: u16 = 1;
@@ -26,12 +26,14 @@ impl Default for ProtocolVersion {
 
 impl ProtocolVersion {
     /// Check if this version is compatible with another version
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn is_compatible_with(&self, other: &ProtocolVersion) -> bool {
         // We can communicate if our ranges overlap
         self.min_supported <= other.current && other.min_supported <= self.current
     }
 
     /// Get the negotiated version to use (highest common version)
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn negotiate_with(&self, other: &ProtocolVersion) -> Option<u16> {
         if !self.is_compatible_with(other) {
             return None;
@@ -49,12 +51,14 @@ pub struct Position {
 }
 
 impl Position {
-    // Create a new position from coordinates
+    /// Create a new position from coordinates
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
     
-    // Add a movement vector to this position
+    /// Add a movement vector to this position
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn apply_movement(&mut self, move_vector: (f32, f32), speed: f32) {
         self.x += move_vector.0 * speed;
         self.y += move_vector.1 * speed;
@@ -62,7 +66,8 @@ impl Position {
         // Clamp the position to world boundaries
     }
     
-    // Calculate distance to another position
+    /// Calculate distance to another position
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn distance_to(&self, other: &Position) -> f32 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
@@ -165,7 +170,8 @@ pub enum ClientMessageType {
 }
 
 impl ServerMessage {
-    // Get the message type
+    /// Get the message type
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn get_type(&self) -> ServerMessageType {
         match self {
             ServerMessage::ServerShutdown { .. } => ServerMessageType::ServerShutdown,
@@ -179,7 +185,8 @@ impl ServerMessage {
         }
     }
     
-    // Get the sequence number
+    /// Get the sequence number
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn get_seq_num(&self) -> u64 {
         match self {
             ServerMessage::ServerShutdown { seq_num, .. } => *seq_num,
@@ -195,7 +202,8 @@ impl ServerMessage {
 }
 
 impl ClientMessage {
-    // Get the message type
+    /// Get the message type
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn get_type(&self) -> ClientMessageType {
         match self {
             ClientMessage::Register { .. } => ClientMessageType::Register,
@@ -209,7 +217,8 @@ impl ClientMessage {
         }
     }
     
-    // Get the sequence number
+    /// Get the sequence number
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn get_seq_num(&self) -> u64 {
         match self {
             ClientMessage::Register { seq_num, .. } => *seq_num,
@@ -238,11 +247,12 @@ pub enum Direction {
 }
 
 impl Direction {
-    // Converts a direction to a movement vector
-    pub fn to_vector(&self) -> (f32, f32) {
+    /// Converts a direction to a movement vector
+    #[allow(dead_code)] // Part of complete protocol API for future use
+    pub fn to_vector(self) -> (f32, f32) {
         // 1/sqrt(2) ≈ 0.7071 is the correct normalization factor for diagonal movement
         // This ensures that diagonal movement has the same speed as cardinal movement
-        let diag = 0.7071;
+        let diag = FRAC_1_SQRT_2;
         
         match self {
             Direction::Up => (0.0, -1.0),
@@ -256,7 +266,8 @@ impl Direction {
         }
     }
     
-    // Parse a direction from a string
+    /// Parse a direction from a string
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "up" | "u" | "north" | "n" => Some(Direction::Up),
@@ -283,6 +294,7 @@ pub struct WorldBoundaries {
 
 impl WorldBoundaries {
     /// Clamp a position to stay within world boundaries
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn clamp_position(&self, x: f32, y: f32) -> (f32, f32) {
         let clamped_x = x.clamp(self.min_x, self.max_x);
         let clamped_y = y.clamp(self.min_y, self.max_y);
@@ -290,12 +302,14 @@ impl WorldBoundaries {
     }
     
     /// Check if a position is within world boundaries
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn is_position_valid(&self, x: f32, y: f32) -> bool {
         x >= self.min_x && x <= self.max_x && 
         y >= self.min_y && y <= self.max_y
     }
     
     /// Apply boundaries to a Position, modifying it in place
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn clamp_position_mut(&self, position: &mut Position) {
         let (x, y) = self.clamp_position(position.x, position.y);
         position.x = x;
@@ -317,7 +331,8 @@ pub enum EmoteType {
 }
 
 impl EmoteType {
-    // Get a display string for the emote
+    /// Get a display string for the emote
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn display_text(&self) -> &'static str {
         match self {
             EmoteType::Wave => "waves hello",
@@ -331,7 +346,8 @@ impl EmoteType {
         }
     }
     
-    // Get a visual representation of the emote for display
+    /// Get a visual representation of the emote for display
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn display_icon(&self) -> &'static str {
         match self {
             EmoteType::Wave => "👋",
@@ -345,7 +361,8 @@ impl EmoteType {
         }
     }
     
-    // Parse emote from string
+    /// Parse emote from string
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
             "wave" | "hello" | "hi" => Some(EmoteType::Wave),

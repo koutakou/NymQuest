@@ -171,6 +171,7 @@ impl ClientConfig {
     }
     
     /// Validate player name according to configuration
+    #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn validate_player_name(&self, name: &str) -> Result<()> {
         if name.is_empty() {
             return Err(anyhow!("Player name cannot be empty"));
@@ -199,6 +200,7 @@ impl ClientConfig {
     }
     
     /// Validate chat message according to configuration
+    #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn validate_chat_message(&self, message: &str) -> Result<()> {
         if message.is_empty() {
             return Err(anyhow!("Chat message cannot be empty"));
@@ -224,21 +226,25 @@ impl ClientConfig {
     }
     
     /// Get connection timeout as Duration
+    #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn connection_timeout(&self) -> Duration {
         Duration::from_millis(self.connection_timeout_ms)
     }
     
     /// Get initial ack timeout as Duration
+    #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn initial_ack_timeout(&self) -> Duration {
         Duration::from_millis(self.initial_ack_timeout_ms)
     }
     
     /// Get subsequent ack timeout as Duration
+    #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn subsequent_ack_timeout(&self) -> Duration {
         Duration::from_millis(self.subsequent_ack_timeout_ms)
     }
     
     /// Get frame duration for FPS limiting
+    #[allow(dead_code)] // Part of complete configuration API for future use
     pub fn frame_duration(&self) -> Duration {
         Duration::from_millis(1000 / self.max_fps as u64)
     }

@@ -1,7 +1,6 @@
 use std::time::{Duration, Instant};
+use colored::{ColoredString, Colorize};
 use std::collections::VecDeque;
-use serde::{Deserialize, Serialize};
-use colored::*;
 
 /// Maximum number of latency samples to keep for statistics
 const MAX_LATENCY_SAMPLES: usize = 20;
@@ -29,6 +28,7 @@ pub enum PrivacyLevel {
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeliveryStatus {
     Sent,       // Message sent to mixnet
+    #[allow(dead_code)] // Part of complete delivery tracking API for future use
     InTransit,  // Message in mixnet pipeline
     Delivered,  // Acknowledgment received
     Failed,     // Delivery failed
@@ -39,8 +39,10 @@ pub enum DeliveryStatus {
 #[derive(Debug, Clone)]
 pub struct TrackedMessage {
     pub seq_num: u64,
+    #[allow(dead_code)] // Part of complete message tracking API for future use
     pub sent_at: Instant,
     pub status: DeliveryStatus,
+    #[allow(dead_code)] // Part of complete message tracking API for future use
     pub retries: u32,
 }
 
@@ -245,16 +247,15 @@ impl StatusMonitor {
     }
 
     /// Check for message timeouts and update their status
+    #[allow(dead_code)] // Part of complete message tracking API for future use
     pub fn check_message_timeouts(&mut self, timeout_duration: Duration) {
         let now = Instant::now();
         
         for msg in &mut self.tracked_messages {
-            if msg.status == DeliveryStatus::Sent || msg.status == DeliveryStatus::InTransit {
-                if now.duration_since(msg.sent_at) > timeout_duration {
-                    msg.status = DeliveryStatus::Timeout;
-                    self.network_stats.messages_failed += 1;
-                    self.network_stats.consecutive_failures += 1;
-                }
+            if (msg.status == DeliveryStatus::Sent || msg.status == DeliveryStatus::InTransit) && now.duration_since(msg.sent_at) > timeout_duration {
+                msg.status = DeliveryStatus::Timeout;
+                self.network_stats.messages_failed += 1;
+                self.network_stats.consecutive_failures += 1;
             }
         }
         
@@ -345,6 +346,7 @@ impl StatusMonitor {
     }
 
     /// Get a colored status indicator for connection health
+    #[allow(dead_code)] // Part of complete monitoring API for future use
     pub fn health_indicator(&self) -> ColoredString {
         match self.connection_health {
             ConnectionHealth::Excellent => "●".green().bold(),
@@ -356,6 +358,7 @@ impl StatusMonitor {
     }
 
     /// Get a colored status indicator for privacy level
+    #[allow(dead_code)] // Part of complete monitoring API for future use
     pub fn privacy_indicator(&self) -> ColoredString {
         match self.privacy_level {
             PrivacyLevel::FullyProtected => "🛡️".green().bold(),
@@ -377,11 +380,13 @@ impl StatusMonitor {
     }
     
     /// Get current message pacing status
+    #[allow(dead_code)] // Part of complete monitoring API for future use
     pub fn get_pacing_status(&self) -> (bool, u64, u64) {
         (self.pacing_info.enabled, self.pacing_info.interval_ms, self.pacing_info.jitter_ms)
     }
     
     /// Get a colored status indicator for message pacing
+    #[allow(dead_code)] // Part of complete monitoring API for future use
     pub fn pacing_indicator(&self) -> ColoredString {
         if self.pacing_info.enabled {
             match self.pacing_info.interval_ms {

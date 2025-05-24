@@ -1,22 +1,16 @@
 use colored::*;
 use std::io::{self, Write};
-use std::collections::HashMap;
-use chrono::{DateTime, Utc, TimeZone, Timelike};
+use chrono::{Utc, TimeZone, Timelike};
 
-use crate::game_protocol::{Player, Position};
-use crate::game_state::{GameState, ChatMessage};
+use crate::game_protocol::Position;
+use crate::game_state::GameState;
 
 /// Constants for critical hit detection in messages
 const CRITICAL_HIT_MARKER: &str = "CRITICAL HIT";
 const CRITICAL_HIT_ALT_MARKER: &str = "critical hit";
 
-/// Define game world boundaries
-const WORLD_MIN_X: f32 = -100.0;
-const WORLD_MAX_X: f32 = 100.0;
-const WORLD_MIN_Y: f32 = -100.0;
-const WORLD_MAX_Y: f32 = 100.0;
-
 /// Clear the terminal screen
+#[allow(dead_code)] // Alternative rendering function for future use
 pub fn clear_screen() {
     print!("{esc}[2J{esc}[1;1H", esc = 27 as char);
     io::stdout().flush().unwrap();
@@ -28,9 +22,14 @@ pub fn clear_screen() {
 /// - The current player is represented as '@' (green)
 /// - Other players are represented as 'O' (yellow)
 /// - Game world coordinates (-100 to 100) are scaled to fit the mini-map
+#[allow(dead_code)] // Alternative rendering function for future use
 pub fn render_mini_map(state: &GameState, _player_pos: &Position) {
     const MAP_SIZE: usize = 15; // Size of the mini-map (15x15 characters)
-    
+    const WORLD_MIN_X: f32 = -100.0;
+    const WORLD_MAX_X: f32 = 100.0;
+    const WORLD_MIN_Y: f32 = -100.0;
+    const WORLD_MAX_Y: f32 = 100.0;
+
     println!("{}", "Mini-map: (You are '@', others are 'O'):".cyan().bold());
     
     // Debug info about world dimensions
@@ -41,6 +40,7 @@ pub fn render_mini_map(state: &GameState, _player_pos: &Position) {
     let mut map = vec![vec![' '; MAP_SIZE]; MAP_SIZE];
     
     // Draw light grid for better cell visualization
+    #[allow(clippy::needless_range_loop)]
     for y in 1..MAP_SIZE-1 {
         for x in 1..MAP_SIZE-1 {
             map[y][x] = '·'; // Light dot for grid points
@@ -62,8 +62,8 @@ pub fn render_mini_map(state: &GameState, _player_pos: &Position) {
     map[MAP_SIZE-1][MAP_SIZE-1] = '+';
     
     // Calculate scale factors to map world coordinates to minimap coordinates
-    let scale_x = (MAP_SIZE - 2) as f32 / (WORLD_MAX_X - WORLD_MIN_X);
-    let scale_y = (MAP_SIZE - 2) as f32 / (WORLD_MAX_Y - WORLD_MIN_Y);
+    let _scale_x = (MAP_SIZE - 2) as f32 / (WORLD_MAX_X - WORLD_MIN_X);
+    let _scale_y = (MAP_SIZE - 2) as f32 / (WORLD_MAX_Y - WORLD_MIN_Y);
     
     // Get current player from state
     let current_player_id = state.player_id.clone();
@@ -122,7 +122,7 @@ pub fn render_mini_map(state: &GameState, _player_pos: &Position) {
     println!("    S   ");
     
     // Add information about movement scale
-    println!("");
+    println!();
     println!("{}:", "Movement Help".cyan().bold());
     println!("  Each {} command moves exactly one cell", "'move <direction>'".green().bold());
     println!("  Valid directions: {}, {}, {}, {}", 
@@ -133,6 +133,7 @@ pub fn render_mini_map(state: &GameState, _player_pos: &Position) {
 }
 
 /// Format a timestamp as a readable time string (HH:MM:SS)
+#[allow(dead_code)] // Alternative rendering function for future use
 fn format_timestamp(timestamp: u64) -> String {
     // Convert milliseconds timestamp to DateTime<Utc>
     let dt = match Utc.timestamp_millis_opt(timestamp as i64) {
@@ -145,6 +146,7 @@ fn format_timestamp(timestamp: u64) -> String {
 }
 
 /// Render the chat history in a dedicated area
+#[allow(dead_code)] // Alternative rendering function for future use
 pub fn render_chat_history(state: &GameState, max_messages: usize) {
     println!("{}", "===== Chat History =====".cyan().bold());
     
@@ -181,7 +183,7 @@ pub fn render_chat_history(state: &GameState, max_messages: usize) {
                     // Current player's messages
                     println!("{} {} {}", 
                              time_str.blue(), 
-                             format!("[You]:").blue().bold(), 
+                             "[You]:".blue().bold(), 
                              content_formatted);
                 },
                 _ => {
@@ -198,6 +200,7 @@ pub fn render_chat_history(state: &GameState, max_messages: usize) {
 }
 
 /// Render the current game state to the terminal
+#[allow(dead_code)] // Alternative rendering function for future use
 pub fn render_game_state(state: &GameState) {
     clear_screen();
     println!("{}\n", "=== NYM MMORPG Client ===".green().bold());
@@ -283,9 +286,8 @@ pub fn render_game_state(state: &GameState) {
     println!("  exit - Quit the game");
     
     // Render chat history (showing last 10 messages)
-    println!("");
     render_chat_history(state, 10);
     
-    print!("\n> ");
+    print!("> ");
     io::stdout().flush().unwrap();
 }

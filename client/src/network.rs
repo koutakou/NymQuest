@@ -72,6 +72,7 @@ pub struct NetworkManager {
     received_server_msgs: HashSet<u64>,
     seq_counter: u64,
     original_messages: HashMap<u64, OriginalMessage>,
+    #[allow(dead_code)] // Part of complete network API for future use
     config: ClientConfig,
     status_monitor: Arc<Mutex<StatusMonitor>>,
     /// Token bucket for rate limiting
@@ -580,7 +581,7 @@ impl NetworkManager {
         // Handle explicit acknowledgements first
         if let ServerMessage::Ack { client_seq_num, original_type } = &server_message {
             // Remove from pending acks when we receive an ack
-            if let Some((sent_time, _)) = self.pending_acks.remove(&client_seq_num) {
+            if let Some((sent_time, _)) = self.pending_acks.remove(client_seq_num) {
                 let latency_ms = sent_time.elapsed().as_millis() as u64;
                 debug!("Received acknowledgment for message {} of type {:?} (latency: {}ms)", client_seq_num, original_type, latency_ms);
                 
@@ -590,8 +591,8 @@ impl NetworkManager {
                 }
                 
                 // Also remove retry count and original message
-                self.retry_count.remove(&client_seq_num);
-                self.original_messages.remove(&client_seq_num);
+                self.retry_count.remove(client_seq_num);
+                self.original_messages.remove(client_seq_num);
             }
             return None; // Don't pass Ack messages to the application
         }
@@ -772,16 +773,19 @@ impl NetworkManager {
     }
     
     /// Get a reference to the server address
+    #[allow(dead_code)] // Part of complete network API for future use
     pub fn server_address(&self) -> &str {
         &self.server_address
     }
     
     /// Check if the client is connected
+    #[allow(dead_code)] // Part of complete network API for future use
     pub fn is_connected(&self) -> bool {
         self.client.is_some()
     }
     
     /// Get the negotiated protocol version for this session
+    #[allow(dead_code)] // Part of complete network API for future use
     pub fn get_negotiated_protocol_version(&self) -> Option<u16> {
         self.negotiated_protocol_version
     }

@@ -1,28 +1,24 @@
-use rustyline::completion::{Completer, Pair};
-use rustyline::highlight::Highlighter;
-use rustyline::hint::{Hinter, HistoryHinter};
-use rustyline::validate::{Validator, ValidationContext, ValidationResult};
-use rustyline::{Context, Helper, Result, error::ReadlineError};
-use std::borrow::Cow::{self, Borrowed, Owned};
+use rustyline::{Context, Helper, Result};
+use std::borrow::Cow::{self, Borrowed};
 
 /// Custom history hinter to provide command suggestions
 pub struct GameHistoryHinter {
-    hinter: HistoryHinter,
+    hinter: rustyline::hint::HistoryHinter,
 }
 
 impl GameHistoryHinter {
     /// Create a new GameHistoryHinter
     pub fn new() -> Self {
         Self {
-            hinter: HistoryHinter {}
+            hinter: rustyline::hint::HistoryHinter {},
         }
     }
 }
 
 // Implement all required traits for the Helper trait
 
-impl Completer for GameHistoryHinter {
-    type Candidate = Pair;
+impl rustyline::completion::Completer for GameHistoryHinter {
+    type Candidate = rustyline::completion::Pair;
 
     fn complete(
         &self,
@@ -35,8 +31,8 @@ impl Completer for GameHistoryHinter {
         
         // Only provide completions for commands that start with / or are at beginning
         if line.starts_with('/') || line.is_empty() {
-            let partial = if line.starts_with('/') { &line[1..] } else { line };
-            let pos_offset = if line.starts_with('/') { 1 } else { 0 };
+            let partial = if let Some(stripped) = line.strip_prefix('/') { stripped } else { line };
+            let _pos_offset = if line.starts_with('/') { 1 } else { 0 };
             
             // Full command list for auto-completion
             let commands = [
@@ -56,9 +52,9 @@ impl Completer for GameHistoryHinter {
             for &cmd in &commands {
                 if cmd.starts_with(partial) {
                     let display = if line.starts_with('/') { format!("/{}\t", cmd) } else { cmd.to_string() };
-                    completions.push(Pair {
+                    completions.push(rustyline::completion::Pair {
                         display,
-                        replacement: format!("{}", cmd),
+                        replacement: cmd.to_string(),
                     });
                 }
             }
@@ -70,7 +66,7 @@ impl Completer for GameHistoryHinter {
     }
 }
 
-impl Hinter for GameHistoryHinter {
+impl rustyline::hint::Hinter for GameHistoryHinter {
     type Hint = String;
 
     fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<Self::Hint> {
@@ -81,7 +77,7 @@ impl Hinter for GameHistoryHinter {
 
         // If no history hint, provide suggestions for common commands
         if line.starts_with('/') || line.is_empty() {
-            let partial = if line.starts_with('/') { &line[1..] } else { line };
+            let partial = if let Some(stripped) = line.strip_prefix('/') { stripped } else { line };
             
             // Command suggestions based on what user has typed
             let suggestions = [
@@ -119,7 +115,7 @@ impl Hinter for GameHistoryHinter {
     }
 }
 
-impl Highlighter for GameHistoryHinter {
+impl rustyline::highlight::Highlighter for GameHistoryHinter {
     fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {
         // No special highlighting needed
         Borrowed(line)
@@ -130,10 +126,10 @@ impl Highlighter for GameHistoryHinter {
     }
 }
 
-impl Validator for GameHistoryHinter {
-    fn validate(&self, ctx: &mut ValidationContext) -> Result<ValidationResult> {
+impl rustyline::validate::Validator for GameHistoryHinter {
+    fn validate(&self, _ctx: &mut rustyline::validate::ValidationContext) -> Result<rustyline::validate::ValidationResult> {
         // All input is valid for our case
-        Ok(ValidationResult::Valid(None))
+        Ok(rustyline::validate::ValidationResult::Valid(None))
     }
 }
 

@@ -106,7 +106,7 @@ impl GameState {
     /// Get a slice of the most recent chat messages
     pub fn recent_chat_messages(&self, count: usize) -> Vec<&ChatMessage> {
         let history_len = self.chat_history.len();
-        let start_idx = if count >= history_len { 0 } else { history_len - count };
+        let start_idx = history_len.saturating_sub(count);
         
         self.chat_history.iter().skip(start_idx).collect()
     }

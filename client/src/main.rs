@@ -15,17 +15,15 @@ use colored::*;
 use rustyline::error::ReadlineError;
 use rustyline::{Editor, Config};
 use std::path::PathBuf;
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn, error};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use command_completer::GameHistoryHinter;
-use ui_components::render_help_section;
+use ui_components::{render_game_state, render_help_section, clear_screen};
 use config::ClientConfig;
-
-use game_protocol::{ClientMessage, ServerMessage, Direction, Position, ProtocolVersion};
+use game_protocol::{ClientMessage, ServerMessage, Direction, ProtocolVersion};
 use game_state::GameState;
 use network::NetworkManager;
-use ui_components::{render_game_state, clear_screen, draw_panel, format_chat_message};
 
 /// Initialize structured logging for the client
 fn init_logging() -> anyhow::Result<()> {
@@ -114,7 +112,7 @@ async fn main() -> anyhow::Result<()> {
     // Clone necessary values for the input handling task
     let tx_clone = tx.clone();
     let game_state_clone = Arc::clone(&game_state);
-    let config_clone = config.clone();
+    let _config_clone = config.clone();
     
     // Spawn a task to handle user input with command history
     task::spawn(async move {
@@ -183,7 +181,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     
                     // Send the command to main thread
-                    if let Err(_) = tx_clone.send(input).await {
+                    if (tx_clone.send(input).await).is_err() {
                         break;
                     }
                 },
@@ -195,8 +193,9 @@ async fn main() -> anyhow::Result<()> {
                     // Ctrl-D pressed, exit properly
                     info!("EOF (CTRL-D) detected, exiting...");
                     let exit_command = "exit".to_string();
-                    let _ = tx_clone.send(exit_command).await;
-                    break;
+                    if (tx_clone.send(exit_command).await).is_err() {
+                        break;
+                    }
                 },
                 Err(err) => {
                     error!("Error reading input: {}", err);
@@ -322,7 +321,7 @@ async fn process_user_command(
             
             // Create a block to limit the scope of the mutex lock
             {
-                let predicted_pos = match game_state.lock() {
+                let _predicted_pos = match game_state.lock() {
                     Ok(mut state) => {
                         // Check if we have a player ID and clone it to avoid borrow issues
                         if let Some(player_id) = state.player_id.clone() {
@@ -383,7 +382,7 @@ async fn process_user_command(
         "left" | "l" | "west" | "w" => {
             handle_movement_direction(network, game_state, Direction::Left, config).await?
         },
-        "right" | "r" | "east" | "e" => {
+        "right" | "east" | "e" => {
             handle_movement_direction(network, game_state, Direction::Right, config).await?
         },
         // Diagonal movement shortcuts
@@ -496,11 +495,7 @@ async fn process_user_command(
         },
         // Help command
         "help" | "h" | "?" => {
-            if let Ok(state) = game_state.lock() {
-                render_help_section();
-            } else {
-                error!("Failed to access game state for help. Please restart the client.");
-            }
+            render_help_section();
             return Ok(());
         },
         // Message pacing commands for privacy protection
@@ -657,7 +652,7 @@ async fn handle_movement_direction(
 
     // Create a block to limit the scope of the mutex lock
     {
-        let predicted_pos = match game_state.lock() {
+        let _predicted_pos = match game_state.lock() {
             Ok(mut state) => {
                 // Check if we have a player ID and clone it to avoid borrow issues
                 if let Some(player_id) = state.player_id.clone() {
@@ -719,7 +714,7 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
         }
     };
     
-    let needs_refresh = match server_message.clone() {
+    match server_message {
         ServerMessage::ServerShutdown { message, shutdown_in_seconds, seq_num: _ } => {
             // Display a prominent shutdown warning
             let warning = format!("⚠️ SERVER SHUTDOWN IN {} SECONDS: {}", shutdown_in_seconds, message);
@@ -732,14 +727,9 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
             
             // Immediate exit without sending a disconnect message
             info!("Server initiated shutdown. Exiting immediately without sending disconnect message...");
-            
-            // Force immediate exit - code after this will not execute
             std::process::exit(0);
-            
-            // This line is never reached, but keeps the compiler happy
-            true
         },
-        ServerMessage::RegisterAck { player_id, world_boundaries, negotiated_version, seq_num: _ } => {
+        ServerMessage::RegisterAck { player_id, world_boundaries, negotiated_version: _, seq_num: _ } => {
             state.set_player_id(player_id);
             state.set_world_boundaries(world_boundaries);
             info!("Registration successful! Received world boundaries from server.");
@@ -791,12 +781,5 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
             // We don't need to do anything here in the main loop
             false
         },
-        _ => {
-            // Handle any future message types gracefully
-            warn!("Received unknown server message type");
-            false
-        }
-    };
-    
-    needs_refresh
+    }
 }

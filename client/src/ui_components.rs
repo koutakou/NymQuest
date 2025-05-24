@@ -1,36 +1,52 @@
 use colored::*;
 use std::io::{self, Write};
-use std::collections::HashMap;
-use chrono::{DateTime, Utc, TimeZone, Timelike};
+use chrono::{Utc, TimeZone, Timelike};
 
 use crate::game_protocol::{Player, Position};
 use crate::game_state::{GameState, ChatMessage};
 
 /// Modern Unicode box drawing characters for a sleek interface
 const DOUBLE_HORIZONTAL: &str = "═";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_VERTICAL: &str = "║";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements  
 const DOUBLE_TOP_LEFT: &str = "╔";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_TOP_RIGHT: &str = "╗";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_BOTTOM_LEFT: &str = "╚";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_BOTTOM_RIGHT: &str = "╝";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_CROSS: &str = "╬";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_T_DOWN: &str = "╦";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_T_UP: &str = "╩";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_T_RIGHT: &str = "╠";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const DOUBLE_T_LEFT: &str = "╣";
 
 const SINGLE_HORIZONTAL: &str = "─";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const SINGLE_VERTICAL: &str = "│";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const SINGLE_TOP_LEFT: &str = "┌";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const SINGLE_TOP_RIGHT: &str = "┐";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const SINGLE_BOTTOM_LEFT: &str = "└";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const SINGLE_BOTTOM_RIGHT: &str = "┘";
 
 const LIGHT_HORIZONTAL: &str = "┄";
+#[allow(dead_code)] // Part of complete box drawing character set for future UI enhancements
 const LIGHT_VERTICAL: &str = "┊";
 
 /// Modern UI symbols and indicators
 const ICON_SHIELD: &str = "🛡️";
+#[allow(dead_code)] // Part of complete icon set for future UI enhancements
 const ICON_HEART: &str = "❤️";
 const ICON_LOCATION: &str = "📍";
 const ICON_USERS: &str = "👥";
@@ -42,25 +58,23 @@ const ICON_WARNING: &str = "⚠️";
 const ICON_SUCCESS: &str = "✅";
 const ICON_INFO: &str = "ℹ️";
 const ICON_ARROW_RIGHT: &str = "→";
+#[allow(dead_code)] // Part of complete icon set for future UI enhancements
 const ICON_PACING: &str = "⏱️";
 const ICON_BULLET: &str = "•";
 
 /// Health bar and progress indicators
 const HEALTH_FULL: &str = "█";
+#[allow(dead_code)] // Part of complete health bar character set for future UI enhancements
 const HEALTH_THREE_QUARTERS: &str = "▉";
+#[allow(dead_code)] // Part of complete health bar character set for future UI enhancements
 const HEALTH_HALF: &str = "▌";
+#[allow(dead_code)] // Part of complete health bar character set for future UI enhancements
 const HEALTH_QUARTER: &str = "▎";
 const HEALTH_EMPTY: &str = "░";
 
 /// Constants for critical hit detection in messages
 const CRITICAL_HIT_MARKER: &str = "CRITICAL HIT";
 const CRITICAL_HIT_ALT_MARKER: &str = "critical hit";
-
-/// Define game world boundaries
-const WORLD_MIN_X: f32 = -100.0;
-const WORLD_MAX_X: f32 = 100.0;
-const WORLD_MIN_Y: f32 = -100.0;
-const WORLD_MAX_Y: f32 = 100.0;
 
 /// Terminal width for responsive design
 const TERMINAL_WIDTH: usize = 120;
@@ -102,7 +116,7 @@ pub fn draw_header() {
 
 /// Draw a modern panel with title
 pub fn draw_panel(title: &str, content: &[String], width: usize, style: PanelStyle) {
-    let panel_width = width.max(40).min(TERMINAL_WIDTH - 4); // Ensure minimum width and prevent overflow
+    let panel_width = width.clamp(40, TERMINAL_WIDTH - 4); // Ensure minimum width and prevent overflow
     
     // Choose border style based on panel type
     let (h_char, title_color) = match style {
@@ -192,7 +206,7 @@ fn strip_ansi_codes(input: &str) -> String {
         if ch == '\x1b' {
             if chars.peek() == Some(&'[') {
                 chars.next(); // consume '['
-                while let Some(escape_ch) = chars.next() {
+                for escape_ch in chars.by_ref() {
                     if escape_ch.is_ascii_alphabetic() {
                         break;
                     }
@@ -207,6 +221,7 @@ fn strip_ansi_codes(input: &str) -> String {
 }
 
 /// Format a player name based on their relation to the current player
+#[allow(dead_code)] // Part of complete UI API for future enhancements
 pub fn format_player_name(player: &Player, current_player_id: &Option<String>) -> ColoredString {
     if Some(&player.id) == current_player_id.as_ref() {
         player.name.bright_green().bold()
@@ -298,6 +313,7 @@ pub fn render_mini_map(state: &GameState, current_position: Option<&Position>) {
     let mut map = vec![vec![' '; MAP_SIZE]; MAP_SIZE];
     
     // Fill with terrain dots
+    #[allow(clippy::needless_range_loop)]
     for y in 1..MAP_SIZE-1 {
         for x in 1..MAP_SIZE-1 {
             map[y][x] = '·';
@@ -315,8 +331,8 @@ pub fn render_mini_map(state: &GameState, current_position: Option<&Position>) {
     // Place players
     let current_player_id = state.player_id.clone();
     for (id, player) in &state.players {
-        let norm_x = (player.position.x - WORLD_MIN_X) / (WORLD_MAX_X - WORLD_MIN_X);
-        let norm_y = (player.position.y - WORLD_MIN_Y) / (WORLD_MAX_Y - WORLD_MIN_Y);
+        let norm_x = (player.position.x - 0.0) / (100.0 - 0.0);
+        let norm_y = (player.position.y - 0.0) / (100.0 - 0.0);
         
         let map_x = (norm_x * (MAP_SIZE - 2) as f32) as usize + 1;
         let map_y = (norm_y * (MAP_SIZE - 2) as f32) as usize + 1;
@@ -338,7 +354,7 @@ pub fn render_mini_map(state: &GameState, current_position: Option<&Position>) {
     
     // World info
     map_content.push(format!("{} World: X[{:.0},{:.0}] Y[{:.0},{:.0}]", 
-        ICON_LOCATION, WORLD_MIN_X, WORLD_MAX_X, WORLD_MIN_Y, WORLD_MAX_Y));
+        ICON_LOCATION, 0.0, 100.0, 0.0, 100.0));
     map_content.push(format!("{} Position: ({:.1}, {:.1})", 
         ICON_ARROW_RIGHT, current_player_pos.x, current_player_pos.y));
     map_content.push("".to_string());
@@ -352,7 +368,7 @@ pub fn render_mini_map(state: &GameState, current_position: Option<&Position>) {
                 '●' => line.push_str(&c.to_string().bright_yellow().to_string()),
                 '·' => line.push_str(&c.to_string().blue().dimmed().to_string()),
                 '┼' => line.push_str(&c.to_string().cyan().to_string()),
-                _ => line.push_str(&c.to_string()),
+                _ => line.push(c),
             }
         }
         map_content.push(line);

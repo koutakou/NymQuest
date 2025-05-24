@@ -4,42 +4,50 @@ use anyhow::{Result, anyhow};
 use serde::{Serialize, Deserialize};
 use rand::{RngCore, rngs::OsRng};
 use base64::{Engine as _, engine::general_purpose};
+use std::time::Instant;
 
 // Type alias for HMAC-SHA256
 type HmacSha256 = Hmac<Sha256>;
 
 /// Key used for message authentication between client and server
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct AuthKey {
     key: Vec<u8>,
+    #[allow(dead_code)] // Part of complete authentication API for future use
+    created_at: Instant,
 }
 
 impl AuthKey {
     /// Generate a new random authentication key
+    #[allow(dead_code)] // Part of complete authentication API for future use
     pub fn new_random() -> Self {
         let mut key = vec![0u8; 32]; // 256 bits key
         OsRng.fill_bytes(&mut key);
-        Self { key }
+        Self { key, created_at: Instant::now() }
     }
 
     /// Create an auth key from an existing byte array
+    #[allow(dead_code)] // Part of complete authentication API for future use
     pub fn from_bytes(bytes: &[u8]) -> Self {
-        Self { key: bytes.to_vec() }
+        Self { key: bytes.to_vec(), created_at: Instant::now() }
     }
 
     /// Encode the key as a base64 string for storage
+    #[allow(dead_code)] // Part of complete authentication API for future use
     pub fn to_base64(&self) -> String {
         general_purpose::STANDARD.encode(&self.key)
     }
 
     /// Create an auth key from a base64 encoded string
+    #[allow(dead_code)] // Part of complete authentication API for future use
     pub fn from_base64(encoded: &str) -> Result<Self> {
         let key = general_purpose::STANDARD.decode(encoded)
             .map_err(|e| anyhow!("Failed to decode auth key: {}", e))?;
-        Ok(Self { key })
+        Ok(Self { key, created_at: Instant::now() })
     }
 
     /// Generate an authentication tag for the given message
+    #[allow(dead_code)] // Part of complete authentication API for future use
     pub fn generate_tag<T: Serialize>(&self, message: &T) -> Result<String> {
         // Serialize the message to a JSON string
         let message_str = serde_json::to_string(message)
@@ -60,6 +68,7 @@ impl AuthKey {
     }
 
     /// Verify an authentication tag for the given message
+    #[allow(dead_code)] // Part of complete authentication API for future use
     pub fn verify_tag<T: Serialize>(&self, message: &T, tag: &str) -> Result<bool> {
         let expected_tag = self.generate_tag(message)?;
         Ok(expected_tag == tag)
@@ -75,12 +84,14 @@ pub struct AuthenticatedMessage<T> {
 
 impl<T: Serialize> AuthenticatedMessage<T> {
     /// Create a new authenticated message by generating a tag
+    #[allow(dead_code)] // Part of complete authentication API for future use
     pub fn new(message: T, auth_key: &AuthKey) -> Result<Self> {
         let auth_tag = auth_key.generate_tag(&message)?;
         Ok(Self { message, auth_tag })
     }
 
     /// Verify that this message has not been tampered with
+    #[allow(dead_code)] // Part of complete authentication API for future use
     pub fn verify(&self, auth_key: &AuthKey) -> Result<bool>
     where T: Serialize + Clone {
         auth_key.verify_tag(&self.message, &self.auth_tag)
