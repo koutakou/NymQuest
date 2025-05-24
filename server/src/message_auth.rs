@@ -3,7 +3,7 @@ use sha2::Sha256;
 use anyhow::{anyhow, Result};
 use base64::{Engine, engine::general_purpose};
 use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::fs;
 use tracing::info;
 use rand::{RngCore, rngs::OsRng};
@@ -26,6 +26,7 @@ impl AuthKey {
     }
 
     /// Create an auth key from an existing byte array
+    #[allow(dead_code)]
     pub fn from_bytes(bytes: &[u8]) -> Self {
         Self { key: bytes.to_vec() }
     }
@@ -36,6 +37,7 @@ impl AuthKey {
     }
 
     /// Create an auth key from a base64 encoded string
+    #[allow(dead_code)]
     pub fn from_base64(encoded: &str) -> Result<Self> {
         let key = general_purpose::STANDARD.decode(encoded)
             .map_err(|e| anyhow!("Failed to decode auth key: {}", e))?;
@@ -43,6 +45,7 @@ impl AuthKey {
     }
     
     /// Save the authentication key to a file
+    #[allow(dead_code)]
     pub fn save_to_file(&self, path: &Path) -> Result<()> {
         // Create parent directory if it doesn't exist
         if let Some(parent) = path.parent() {
@@ -56,6 +59,7 @@ impl AuthKey {
     }
     
     /// Load the authentication key from a file, or create a new one if the file doesn't exist
+    #[allow(dead_code)]
     pub fn load_or_create(path: &Path) -> Result<Self> {
         if path.exists() {
             // Load existing key

@@ -6,27 +6,25 @@ mod message_auth;
 mod config;
 mod persistence;
 
-use game_protocol::{Player, Position, ClientMessage, ServerMessage};
+use game_protocol::{Player, Position, ClientMessage};
 use game_state::GameState;
-use handlers::{handle_client_message, broadcast_game_state, send_heartbeat_requests, cleanup_inactive_players, init_rate_limiter, cleanup_rate_limiter, broadcast_shutdown_notification};
+use handlers::{handle_client_message, send_heartbeat_requests, cleanup_inactive_players, init_rate_limiter, cleanup_rate_limiter, broadcast_shutdown_notification};
 use utils::save_server_address;
 use message_auth::{AuthKey, AuthenticatedMessage};
 use config::GameConfig;
-use persistence::{GameStatePersistence, PersistedPlayer};
+use persistence::GameStatePersistence;
 
-use nym_sdk::mixnet::{MixnetClient, MixnetClientBuilder, StoragePaths, AnonymousSenderTag, MixnetMessageSender, Recipient, IncludedSurbs};
+use nym_sdk::mixnet::{MixnetClient, MixnetClientBuilder, StoragePaths, AnonymousSenderTag};
 use std::path::PathBuf;
 use futures::StreamExt;
-use std::time::{SystemTime, UNIX_EPOCH, Duration};
+use std::time::Duration;
 use std::sync::Arc;
 use anyhow::Result;
 use tracing::{info, warn, error, debug};
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
-use tokio::time::{interval, timeout};
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
+use tokio::time::interval;
 use std::time::Instant;
 
-// For thread-safe handling of received message tracking
-#[macro_use]
 extern crate lazy_static;
 
 /// Initialize structured logging for the server
@@ -235,7 +233,6 @@ async fn main() -> Result<()> {
     // Main event loop
     info!("Server ready to receive connections");
     let mut heartbeat_interval = interval(Duration::from_secs(game_config.heartbeat_interval_seconds));
-    let mut broadcast_interval = interval(Duration::from_secs(game_config.state_broadcast_interval_seconds));
     let mut cleanup_interval = interval(Duration::from_secs(game_config.inactive_player_cleanup_interval_seconds));
     
     // Add persistence interval (save state every 2 minutes)

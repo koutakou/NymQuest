@@ -139,8 +139,8 @@ impl GameConfig {
         config.crit_multiplier = Self::load_env_f32("NYMQUEST_CRIT_MULTIPLIER", config.crit_multiplier)?;
         
         // Persistence settings
-        let enable_persistence = Self::parse_env_bool("NYMQUEST_ENABLE_PERSISTENCE", true);
-        let persistence_dir = env::var("NYMQUEST_PERSISTENCE_DIR")
+        let _enable_persistence = Self::parse_env_bool("NYMQUEST_ENABLE_PERSISTENCE", true);
+        let _persistence_dir = env::var("NYMQUEST_PERSISTENCE_DIR")
             .unwrap_or_else(|_| "./game_data".to_string());
         
         // Rate limiting settings
@@ -307,16 +307,19 @@ impl GameConfig {
         y >= self.world_min_y && y <= self.world_max_y
     }
     
+    #[allow(dead_code)]
     /// Get heartbeat interval as Duration
     pub fn heartbeat_interval(&self) -> Duration {
         Duration::from_secs(self.heartbeat_interval_seconds)
     }
     
+    #[allow(dead_code)]
     /// Get heartbeat timeout as Duration
     pub fn heartbeat_timeout(&self) -> Duration {
         Duration::from_secs(self.heartbeat_timeout_seconds)
     }
     
+    #[allow(dead_code)]
     /// Get attack cooldown as Duration
     pub fn attack_cooldown(&self) -> Duration {
         Duration::from_secs(self.attack_cooldown_seconds)
@@ -341,7 +344,7 @@ impl GameConfig {
     /// Load a boolean value from environment variable with validation
     fn load_env_bool(name: &str, default: bool) -> Result<bool> {
         match env::var(name) {
-            Ok(value) => {
+            Ok(_value) => {
                 Ok(Self::parse_env_bool(name, default))
             },
             Err(_) => Ok(default)

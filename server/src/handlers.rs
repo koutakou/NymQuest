@@ -1,15 +1,15 @@
 use anyhow::Result;
-use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender, Recipient};
+use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use rand::{thread_rng, Rng};
 use tracing::{info, warn, error, debug, trace};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
-use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType, WorldBoundaries, EmoteType, ProtocolVersion};
+use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, WorldBoundaries, EmoteType, ProtocolVersion};
 use crate::game_state::GameState;
 use crate::config::GameConfig;
 
@@ -101,6 +101,7 @@ impl RateLimiter {
 }
 
 // Helper function to convert Direction to a human-readable string
+#[allow(dead_code)]
 fn print_direction(direction: &Direction) -> &'static str {
     match direction {
         Direction::Up => "up",
@@ -271,7 +272,7 @@ pub async fn broadcast_shutdown_notification(
     game_state: &Arc<GameState>,
     message: &str,
     shutdown_in_seconds: u8,
-    auth_key: &AuthKey
+    _auth_key: &AuthKey
 ) -> Result<()> {
     // Get all connected players
     let player_tags = game_state.get_player_tags();
@@ -301,6 +302,7 @@ pub async fn broadcast_shutdown_notification(
 }
 
 /// Broadcast game state to all active players
+#[allow(dead_code)]
 pub async fn broadcast_game_state(
     client: &MixnetClient,
     game_state: &Arc<GameState>,
@@ -352,8 +354,7 @@ pub async fn broadcast_game_state(
     Ok(())
 }
 
-/// Global rate limiter instance for DoS protection
-/// Uses lazy_static to ensure thread-safe initialization
+// Global rate limiter instance for DoS protection
 lazy_static::lazy_static! {
     static ref GLOBAL_RATE_LIMITER: Arc<Mutex<Option<RateLimiter>>> = Arc::new(Mutex::new(None));
 }
@@ -428,7 +429,7 @@ pub async fn handle_client_message(
     
     // Process the message based on its type
     match message {
-        ClientMessage::Register { name, seq_num, protocol_version } => {
+        ClientMessage::Register { name, seq_num: _, protocol_version } => {
             // First, check protocol version compatibility
             let server_version = ProtocolVersion::default();
             let negotiated_version = match server_version.negotiate_with(&protocol_version) {
@@ -965,10 +966,10 @@ async fn handle_disconnect(
 
 /// Handle heartbeat messages
 async fn handle_heartbeat(
-    client: &MixnetClient,
+    _client: &MixnetClient,
     game_state: &Arc<GameState>,
     sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey
+    _auth_key: &AuthKey
 ) -> Result<()> {
     // Find the player ID from sender tag
     if let Some(player_id) = game_state.get_player_id(&sender_tag) {

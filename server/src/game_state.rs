@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Mutex, RwLock};
 use uuid::Uuid;
 use std::time::{SystemTime, UNIX_EPOCH};
 use rand::{thread_rng, Rng};
@@ -26,6 +26,7 @@ pub struct GameState {
 
 impl GameState {
     /// Create a new empty GameState with default configuration
+    #[allow(dead_code)]
     pub fn new() -> Self {
         let config = GameConfig::default();
         GameState {
@@ -96,7 +97,7 @@ impl GameState {
         
         // Generate a privacy-preserving display ID using a more anonymous scheme
         // Use a random alphanumeric code to improve privacy protection
-        let display_id = {
+        let _display_id = {
             let mut rng = thread_rng();
             // Generate a random prefix from a set of common words
             let prefixes = ["Hero", "Warrior", "Knight", "Scout", "Ranger", "Mage", "Nomad", "Shadow"];
@@ -111,7 +112,7 @@ impl GameState {
         // Ensure the display ID is unique
         let unique_display_id = {
             match self.players.read() {
-                Ok(mut state) => {
+                Ok(state) => {
                     let mut current_id = format!("Player{}", state.len() + 1);
                     let mut attempts = 0;
                     

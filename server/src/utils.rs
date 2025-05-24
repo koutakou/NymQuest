@@ -19,6 +19,7 @@ pub fn save_server_address(address: &str, auth_key: &AuthKey, file_path: &str) -
 }
 
 /// Get current timestamp in seconds
+#[allow(dead_code)]
 pub fn current_timestamp() -> u64 {
     use std::time::{SystemTime, UNIX_EPOCH};
     

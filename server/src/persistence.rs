@@ -4,8 +4,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::fs;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tracing::{info, warn, error, debug};
+use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::game_protocol::{Player, Position};
@@ -234,12 +233,12 @@ impl GameStatePersistence {
         removed_count
     }
 
-    /// Get the current session ID
+    #[allow(dead_code)]
     pub fn session_id(&self) -> &str {
         &self.session_id
     }
 
-    /// Check if persistence is enabled
+    #[allow(dead_code)]
     pub fn is_enabled(&self) -> bool {
         self.enabled
     }
