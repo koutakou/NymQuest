@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::f32::consts::FRAC_1_SQRT_2;
 
 /// Current protocol version - increment when making breaking changes
 pub const PROTOCOL_VERSION: u16 = 1;
@@ -252,10 +253,10 @@ pub enum Direction {
 
 impl Direction {
     // Converts a direction to a movement vector
-    pub fn to_vector(&self) -> (f32, f32) {
+    pub fn to_vector(self) -> (f32, f32) {
         // 1/sqrt(2) ≈ 0.7071 is the correct normalization factor for diagonal movement
         // This ensures that diagonal movement has the same speed as cardinal movement
-        let diag = 0.7071;
+        let diag = FRAC_1_SQRT_2;
         
         match self {
             Direction::Up => (0.0, -1.0),

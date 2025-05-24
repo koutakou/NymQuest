@@ -1,3 +1,5 @@
+#![allow(clippy::clone_on_copy)]
+
 use anyhow::Result;
 use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender};
 use std::sync::{Arc, Mutex};
@@ -243,6 +245,7 @@ fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
 }
 
 /// Send an acknowledgment message back to the client
+#[allow(clippy::clone_on_copy)]
 async fn send_ack(
     client: &MixnetClient,
     sender_tag: &AnonymousSenderTag,
@@ -387,25 +390,31 @@ pub async fn handle_client_message(
     auth_key: &AuthKey
 ) -> Result<()> {
     // Check rate limit
-    if let Ok(mut limiter_guard) = GLOBAL_RATE_LIMITER.lock() {
+    let should_rate_limit = if let Ok(mut limiter_guard) = GLOBAL_RATE_LIMITER.lock() {
         if let Some(ref mut limiter) = *limiter_guard {
-            if !limiter.check_rate_limit(&sender_tag.to_string()) {
-                warn!("Rate limit exceeded for connection {}", sender_tag);
-                
-                // Send rate limit error to client
-                let error_msg = ServerMessage::Error { 
-                    message: "Rate limit exceeded. Please slow down your message frequency.".to_string(),
-                    seq_num: next_seq_num()
-                };
-                let authenticated_response = AuthenticatedMessage::new(error_msg, auth_key)?;
-                let response_str = serde_json::to_string(&authenticated_response)?;
-                
-                // Send reply to the rate-limited client
-                let _ = client.send_reply(sender_tag.clone(), response_str).await;
-                
-                return Ok(());
-            }
+            !limiter.check_rate_limit(&sender_tag.to_string())
+        } else {
+            false
         }
+    } else {
+        false
+    };
+    
+    if should_rate_limit {
+        warn!("Rate limit exceeded for connection {}", sender_tag);
+        
+        // Send rate limit error to client
+        let error_msg = ServerMessage::Error { 
+            message: "Rate limit exceeded. Please slow down your message frequency.".to_string(),
+            seq_num: next_seq_num()
+        };
+        let authenticated_response = AuthenticatedMessage::new(error_msg, auth_key)?;
+        let response_str = serde_json::to_string(&authenticated_response)?;
+        
+        // Send reply to the rate-limited client
+        let _ = client.send_reply(sender_tag.clone(), response_str).await;
+        
+        return Ok(());
     }
     
     // Get sequence number for replay protection and acknowledgments
@@ -453,7 +462,7 @@ pub async fn handle_client_message(
                     
                     let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
                     let error_json = serde_json::to_string(&authenticated_error)?;
-                    client.send_reply(sender_tag, error_json).await?;
+                    client.send_reply(sender_tag.clone(), error_json).await?;
                     
                     return Ok(());
                 }
@@ -470,7 +479,7 @@ pub async fn handle_client_message(
                 let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
                 let error_json = serde_json::to_string(&authenticated_error)?;
                 
-                client.send_reply(sender_tag, error_json).await?;
+                client.send_reply(sender_tag.clone(), error_json).await?;
                 return Ok(());
             }
             
@@ -770,7 +779,7 @@ async fn handle_attack(
                 seq_num: next_seq_num(),
             };
             let notification_msg = serde_json::to_string(&attack_notification)?;
-            client.send_reply(tag, notification_msg).await?;
+            client.send_reply(tag.clone(), notification_msg).await?;
         }
         
         // Send notification to the attacker
@@ -817,7 +826,7 @@ async fn handle_emote(
             let sender_name = player.name.clone();
             
             // Create the emote message to broadcast to other players
-            let emote_msg = format!("{} {}", emote_type.display_icon(), format!("{} {}", sender_name, emote_type.display_text()));
+            let emote_msg = format!("{} {} {}", emote_type.display_icon(), sender_name, emote_type.display_text());
             
             // Create a chat-like message with the emote
             let chat_msg = ServerMessage::ChatMessage {
@@ -1006,7 +1015,7 @@ pub async fn send_heartbeat_requests(
     debug!("Sending heartbeat requests to {} players", connections.len());
     
     for (player_id, tag) in connections {
-        match client.send_reply(tag, serialized.clone()).await {
+        match client.send_reply(tag.clone(), serialized.clone()).await {
             Ok(_) => {
                 trace!("Heartbeat request sent to player {}", player_id);
             },

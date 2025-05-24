@@ -337,7 +337,7 @@ async fn main() -> Result<()> {
     info!("Server is shutting down gracefully...");
     
     // Final cleanup of rate limiter
-    let _ = cleanup_rate_limiter();
+    cleanup_rate_limiter();
     
     // Disconnect from the mixnet (ensuring data is flushed)
     client.disconnect().await;

@@ -132,7 +132,7 @@ impl GameStatePersistence {
                     id: id.clone(),
                     display_id: player.display_id.clone(),
                     name: player.name.clone(),
-                    position: player.position.clone(),
+                    position: player.position,
                     health: player.health,
                     last_attack_time: player.last_attack_time,
                     last_active: now, // Mark as active during save

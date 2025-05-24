@@ -421,7 +421,7 @@ impl GameState {
         match self.connections.lock() {
             Ok(connections) => {
                 // Extract the sender tags from the (player_id, sender_tag) tuples
-                connections.iter().map(|(_, tag)| tag.clone()).collect()
+                connections.iter().map(|(_, tag)| *tag).collect()
             },
             Err(e) => {
                 error!("Failed to get player tags: {}", e);
@@ -529,7 +529,7 @@ impl GameState {
             Ok(connections) => {
                 connections.iter()
                     .find(|(id, _)| id == player_id)
-                    .map(|(_, tag)| tag.clone())
+                    .map(|(_, tag)| *tag)
             },
             Err(e) => {
                 error!("Failed to access connections to find sender tag: {}", e);
