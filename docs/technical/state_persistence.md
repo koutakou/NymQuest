@@ -1,6 +1,6 @@
 # Game State Persistence
 
-NymQuest includes a robust persistence system that allows the game state to be saved and recovered, ensuring continuity across server restarts.
+NymQuest includes a robust persistence system that allows the game state to be saved and recovered, ensuring continuity across server restarts and preventing data corruption.
 
 ## Overview
 
@@ -11,17 +11,21 @@ The server persistence system automatically:
 - **Validates compatibility** between saved state and current configuration
 - **Cleans up stale data** by removing long-inactive players
 - **Maintains privacy** by excluding network-sensitive information
+- **Ensures graceful shutdown** with final state saves
+- **Prevents storage corruption** with permanent storage locations
 
 ## Implementation Details
 
 ### Persistence Features
 
 - **Automatic Saving**: Game state is automatically saved every 2 minutes while the server is running
+- **Final Shutdown Save**: Performs a final save during graceful shutdown to prevent data loss
 - **Atomic Saves**: Uses temporary files during the write process to prevent corruption if interrupted
 - **JSON Format**: State files are stored in human-readable JSON format for easy inspection if needed
-- **Configurable Storage**: Storage location can be configured via environment variables
+- **Permanent Storage**: Uses platform-specific permanent data directories for reliable storage
 - **Graceful Degradation**: Server operates normally even if persistence is disabled
 - **Position Validation**: Handles world boundary changes by validating saved positions
+- **Signal Handling**: Properly handles termination signals (Ctrl+C) for clean shutdown
 
 ### Data Management
 
@@ -29,6 +33,16 @@ The server persistence system automatically:
 - **Stale Data Cleanup**: Players offline for more than 5 minutes are automatically removed during loading
 - **Privacy Protection**: Network-sensitive information is excluded from the saved data
 - **Compatibility Checking**: Ensures saved state is compatible with current server configuration
+
+### Storage Management
+
+- **Persistent Storage Location**: Nym mixnet data is stored in permanent platform-specific locations:
+  - Linux: `~/.local/share/nymquest/server/nym_storage`
+  - macOS: `~/Library/Application Support/nymquest/server/nym_storage`
+  - Windows: `%APPDATA%\nymquest\server\nym_storage`
+- **Directory Creation**: Storage directories are automatically created if they don't exist
+- **Storage Integrity**: Proper shutdown ensures mixnet storage remains consistent
+- **Network Disconnect**: Clean disconnection from Nym mixnet during shutdown
 
 ### Recovery Process
 

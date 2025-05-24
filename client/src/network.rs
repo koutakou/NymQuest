@@ -5,10 +5,11 @@ use std::fs;
 use std::path::PathBuf;
 use uuid::Uuid;
 use futures::StreamExt;
+use std::time::{Duration, Instant};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
 use tokio::time;
+use rand::Rng;
 use tracing::{info, warn, error, debug, trace};
 
 // Import message authentication module
@@ -21,13 +22,16 @@ use crate::config::ClientConfig;
 use crate::status_monitor::StatusMonitor;
 
 /// Initial time to wait for an acknowledgement before first resend attempt
-const INITIAL_ACK_TIMEOUT_MS: u64 = 5000;
+const INITIAL_ACK_TIMEOUT_MS: u64 = 8000; // Increased from 5000ms to allow more time for mixnet delivery
 
 /// Time to wait for subsequent resend attempts (shorter than initial)
-const SUBSEQUENT_ACK_TIMEOUT_MS: u64 = 2000;
+const SUBSEQUENT_ACK_TIMEOUT_MS: u64 = 3000; // Increased from 2000ms
 
 /// Maximum number of retries for sending a message
-const MAX_RETRIES: usize = 3;
+const MAX_RETRIES: usize = 2; // Reduced from 3 to minimize duplicate fragments
+
+/// Extra timeout for registration messages (needs more time)
+const REGISTRATION_TIMEOUT_EXTRA_MS: u64 = 3000;
 
 /// Client-side rate limiting to prevent hitting server limits
 /// Default: slightly lower than server limits to add safety margin
@@ -36,6 +40,15 @@ const CLIENT_BURST_SIZE: u32 = 15; // Slightly below server default of 20
 
 /// Maximum number of messages to send in a burst before enforcing rate limit
 const MAX_BURST_SIZE: u32 = CLIENT_BURST_SIZE;
+
+/// Default message pacing interval (milliseconds)
+const DEFAULT_PACING_INTERVAL_MS: u64 = 100;
+
+/// Maximum jitter to add to pacing interval (milliseconds)
+const MAX_JITTER_MS: u64 = 150;
+
+/// Default pacing status (enabled/disabled)
+const DEFAULT_PACING_ENABLED: bool = true;
 
 /// NetworkManager handles all interactions with the Nym mixnet
 /// Structure to hold original message content for potential resends
@@ -69,6 +82,12 @@ pub struct NetworkManager {
     negotiated_protocol_version: Option<u16>,
     /// Last time a message was sent (for pacing)
     last_message_sent: Option<Instant>,
+    /// Message pacing interval in milliseconds
+    pacing_interval_ms: u64,
+    /// Whether message pacing is enabled
+    pacing_enabled: bool,
+    /// Last jitter applied to pacing (for monitoring)
+    last_applied_jitter_ms: u64,
 }
 
 impl NetworkManager {
@@ -130,6 +149,9 @@ impl NetworkManager {
             last_rate_limit_update: Instant::now(),
             negotiated_protocol_version: None,
             last_message_sent: None,
+            pacing_interval_ms: DEFAULT_PACING_INTERVAL_MS,
+            pacing_enabled: DEFAULT_PACING_ENABLED,
+            last_applied_jitter_ms: 0,
         })
     }
     
@@ -151,29 +173,49 @@ impl NetworkManager {
         // Get the next sequence number before borrowing client
         let seq_num = self.next_seq_num();
         
-        // Check rate limit before processing
+        // Apply rate limiting if needed
         if !self.check_rate_limit() {
-            warn!("Rate limit exceeded, delaying message send");
-            // Wait until rate limit is restored before sending
+            debug!("Rate limit exceeded, waiting...");
             self.wait_for_rate_limit().await?;
         }
-        
-        // Consume a token for this message
         self.rate_limit_tokens = self.rate_limit_tokens.saturating_sub(1);
         
-        // Apply message pacing for privacy protection (prevent timing correlation attacks)
-        if self.config.enable_message_pacing {
+        // Apply message pacing with jitter if enabled
+        if self.pacing_enabled {
             if let Some(last_sent) = self.last_message_sent {
-                let elapsed = last_sent.elapsed();
-                let min_interval = Duration::from_millis(self.config.message_pacing_interval_ms);
+                let mut rng = rand::thread_rng();
+                let jitter_ms = rng.gen_range(0..=MAX_JITTER_MS);
+                self.last_applied_jitter_ms = jitter_ms;
                 
-                if elapsed < min_interval {
-                    let wait_time = min_interval - elapsed;
-                    debug!("Applying message pacing: waiting {:?} for privacy protection", wait_time);
-                    time::sleep(wait_time).await;
+                // Calculate total delay including base interval and jitter
+                let total_delay_ms = self.pacing_interval_ms + jitter_ms;
+                
+                // Calculate elapsed time since last message
+                let elapsed = last_sent.elapsed().as_millis() as u64;
+                
+                // If not enough time has passed since last message, wait for the remaining time
+                if elapsed < total_delay_ms {
+                    let wait_time = total_delay_ms - elapsed;
+                    debug!("Applying message pacing with {}ms delay ({}ms base + {}ms jitter)", 
+                           wait_time, self.pacing_interval_ms, jitter_ms);
+                    
+                    // Update status monitor with pacing information
+                    if let Ok(mut monitor) = self.status_monitor.lock() {
+                        monitor.update_message_pacing(true, total_delay_ms, jitter_ms);
+                    }
+                    
+                    time::sleep(Duration::from_millis(wait_time)).await;
                 }
             }
+        } else {
+            // Update status monitor to show pacing is disabled
+            if let Ok(mut monitor) = self.status_monitor.lock() {
+                monitor.update_message_pacing(false, 0, 0);
+            }
         }
+        
+        // Record time of message being sent (for future pacing)
+        self.last_message_sent = Some(Instant::now());
         
         if let Some(client) = &mut self.client {
             // For all other message types, attach sequence number
@@ -276,11 +318,18 @@ impl NetworkManager {
         for (&seq_num, &(sent_time, msg_type)) in &self.pending_acks {
             let elapsed = now.duration_since(sent_time).as_millis() as u64;
             
-            // Use a longer timeout for the first retry attempt
-            let timeout = if self.retry_count.get(&seq_num).copied().unwrap_or(0) == 0 {
+            // Use a longer timeout for the first retry attempt and for registration messages
+            let base_timeout = if self.retry_count.get(&seq_num).copied().unwrap_or(0) == 0 {
                 INITIAL_ACK_TIMEOUT_MS
             } else {
                 SUBSEQUENT_ACK_TIMEOUT_MS
+            };
+            
+            // Add extra time for registration messages which often take longer
+            let timeout = if msg_type == ClientMessageType::Register {
+                base_timeout + REGISTRATION_TIMEOUT_EXTRA_MS
+            } else {
+                base_timeout
             };
             
             // Check if we've exceeded the timeout and have retries left
@@ -318,6 +367,16 @@ impl NetworkManager {
         
         // Resend messages
         for (seq_num, msg_type) in to_resend {
+            // For registration messages, add additional delay between retries to prevent fragment overlap
+            if msg_type == ClientMessageType::Register {
+                debug!("Adding extra delay before retrying registration message");
+                // Add a random delay between 500-1500ms before resending registration messages
+                // This helps prevent fragment overlap in the mixnet
+                let mut rng = rand::thread_rng();
+                let delay_ms = rng.gen_range(500..1500);
+                time::sleep(Duration::from_millis(delay_ms)).await;
+            }
+            
             // Update the timestamp for this message
             if let Some(entry) = self.pending_acks.get_mut(&seq_num) {
                 *entry = (Instant::now(), msg_type);
@@ -754,5 +813,25 @@ impl NetworkManager {
         self.rate_limit_tokens = MAX_BURST_SIZE;
         self.last_rate_limit_update = Instant::now();
         Ok(())
+    }
+    
+    /// Set message pacing interval (0 to disable)
+    pub fn set_message_pacing(&mut self, enabled: bool, interval_ms: u64) {
+        self.pacing_enabled = enabled;
+        self.pacing_interval_ms = if enabled { interval_ms } else { 0 };
+        
+        // Update status monitor with new pacing settings
+        if let Ok(mut monitor) = self.status_monitor.lock() {
+            monitor.update_message_pacing(enabled, interval_ms, 0);
+        }
+        
+        debug!("Message pacing {}: interval={}ms", 
+               if enabled { "enabled" } else { "disabled" }, 
+               self.pacing_interval_ms);
+    }
+    
+    /// Get current message pacing configuration
+    pub fn get_message_pacing(&self) -> (bool, u64, u64) {
+        (self.pacing_enabled, self.pacing_interval_ms, self.last_applied_jitter_ms)
     }
 }

@@ -26,6 +26,8 @@ use tracing::{info, warn};
 /// - NYMQUEST_MESSAGE_BURST_SIZE: Maximum burst size for rate limiting (default: 20)
 /// - NYMQUEST_MESSAGE_PROCESSING_INTERVAL_MS: Minimum interval between processing messages in milliseconds (default: 100)
 /// - NYMQUEST_ENABLE_MESSAGE_PROCESSING_PACING: Enable message processing pacing for enhanced privacy (default: false)
+/// - NYMQUEST_STATE_BROADCAST_INTERVAL_SECONDS: Interval for broadcasting game state (default: 5)
+/// - NYMQUEST_INACTIVE_PLAYER_CLEANUP_INTERVAL_SECONDS: Interval for cleaning up inactive players (default: 45)
 #[derive(Debug, Clone)]
 pub struct GameConfig {
     /// Maximum X coordinate boundary for the game world
@@ -74,6 +76,10 @@ pub struct GameConfig {
     pub message_processing_interval_ms: u64,
     /// Enable message processing pacing for enhanced privacy
     pub enable_message_processing_pacing: bool,
+    /// Interval for broadcasting game state in seconds
+    pub state_broadcast_interval_seconds: u64,
+    /// Interval for cleaning up inactive players in seconds
+    pub inactive_player_cleanup_interval_seconds: u64,
 }
 
 impl Default for GameConfig {
@@ -102,6 +108,8 @@ impl Default for GameConfig {
             message_burst_size: 20,
             message_processing_interval_ms: 100,
             enable_message_processing_pacing: false,
+            state_broadcast_interval_seconds: 5,
+            inactive_player_cleanup_interval_seconds: 45,
         }
     }
 }
@@ -136,20 +144,22 @@ impl GameConfig {
             .unwrap_or_else(|_| "./game_data".to_string());
         
         // Rate limiting settings
-        let message_rate_limit = Self::load_env_f32("NYMQUEST_MESSAGE_RATE_LIMIT", 10.0)?;
-        let message_burst_size = Self::load_env_u32("NYMQUEST_MESSAGE_BURST_SIZE", 20)?;
-        let message_processing_interval_ms = Self::load_env_u64("NYMQUEST_MESSAGE_PROCESSING_INTERVAL_MS", 100)?;
-        let enable_message_processing_pacing = Self::parse_env_bool("NYMQUEST_ENABLE_MESSAGE_PROCESSING_PACING", false);
+        config.message_rate_limit = Self::load_env_f32("NYMQUEST_MESSAGE_RATE_LIMIT", config.message_rate_limit)?;
+        config.message_burst_size = Self::load_env_u32("NYMQUEST_MESSAGE_BURST_SIZE", config.message_burst_size)?;
+        config.message_processing_interval_ms = Self::load_env_u64("NYMQUEST_MESSAGE_PROCESSING_INTERVAL_MS", config.message_processing_interval_ms)?;
+        config.enable_message_processing_pacing = Self::load_env_bool("NYMQUEST_ENABLE_MESSAGE_PROCESSING_PACING", config.enable_message_processing_pacing)?;
+        config.state_broadcast_interval_seconds = Self::load_env_u64("NYMQUEST_STATE_BROADCAST_INTERVAL_SECONDS", config.state_broadcast_interval_seconds)?;
+        config.inactive_player_cleanup_interval_seconds = Self::load_env_u64("NYMQUEST_INACTIVE_PLAYER_CLEANUP_INTERVAL_SECONDS", config.inactive_player_cleanup_interval_seconds)?;
         
         // Validate rate limiting settings
-        if message_rate_limit <= 0.0 {
-            return Err(anyhow!("Message rate limit must be positive, got: {}", message_rate_limit));
+        if config.message_rate_limit <= 0.0 {
+            return Err(anyhow!("Message rate limit must be positive, got: {}", config.message_rate_limit));
         }
-        if message_burst_size == 0 {
-            return Err(anyhow!("Message burst size must be positive, got: {}", message_burst_size));
+        if config.message_burst_size == 0 {
+            return Err(anyhow!("Message burst size must be positive, got: {}", config.message_burst_size));
         }
         
-        info!("Rate limiting: {:.1} msg/sec, burst: {}", message_rate_limit, message_burst_size);
+        info!("Rate limiting: {:.1} msg/sec, burst: {}", config.message_rate_limit, config.message_burst_size);
 
         // Validate configuration
         config.validate()?;
@@ -182,12 +192,14 @@ impl GameConfig {
             base_damage: config.base_damage,
             crit_chance: config.crit_chance,
             crit_multiplier: config.crit_multiplier,
-            enable_persistence,
-            persistence_dir,
-            message_rate_limit,
-            message_burst_size,
-            message_processing_interval_ms,
-            enable_message_processing_pacing,
+            enable_persistence: config.enable_persistence,
+            persistence_dir: config.persistence_dir.clone(),
+            message_rate_limit: config.message_rate_limit,
+            message_burst_size: config.message_burst_size,
+            message_processing_interval_ms: config.message_processing_interval_ms,
+            enable_message_processing_pacing: config.enable_message_processing_pacing,
+            state_broadcast_interval_seconds: config.state_broadcast_interval_seconds,
+            inactive_player_cleanup_interval_seconds: config.inactive_player_cleanup_interval_seconds,
         })
     }
     
@@ -310,14 +322,29 @@ impl GameConfig {
         Duration::from_secs(self.attack_cooldown_seconds)
     }
     
-    // Helper functions for loading environment variables with validation
-    fn load_env_f32(var_name: &str, default: f32) -> Result<f32> {
-        match env::var(var_name) {
-            Ok(val) => {
-                val.parse::<f32>()
-                    .map_err(|e| anyhow!("Invalid float value for {}: {} ({})", var_name, val, e))
+    /// Load a f32 value from environment variable with validation
+    fn load_env_f32(name: &str, default: f32) -> Result<f32> {
+        match env::var(name) {
+            Ok(value) => {
+                match value.parse::<f32>() {
+                    Ok(parsed) => Ok(parsed),
+                    Err(_) => {
+                        warn!("Invalid {} value: '{}', using default: {}", name, value, default);
+                        Ok(default)
+                    }
+                }
             },
-            Err(_) => Ok(default),
+            Err(_) => Ok(default)
+        }
+    }
+    
+    /// Load a boolean value from environment variable with validation
+    fn load_env_bool(name: &str, default: bool) -> Result<bool> {
+        match env::var(name) {
+            Ok(value) => {
+                Ok(Self::parse_env_bool(name, default))
+            },
+            Err(_) => Ok(default)
         }
     }
     

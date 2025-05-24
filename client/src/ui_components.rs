@@ -42,6 +42,7 @@ const ICON_WARNING: &str = "⚠️";
 const ICON_SUCCESS: &str = "✅";
 const ICON_INFO: &str = "ℹ️";
 const ICON_ARROW_RIGHT: &str = "→";
+const ICON_PACING: &str = "⏱️";
 const ICON_BULLET: &str = "•";
 
 /// Health bar and progress indicators
@@ -481,6 +482,22 @@ pub fn render_status_dashboard(state: &GameState) {
     };
     content.push(mixnet_status);
     
+    // Message pacing status
+    let pacing_status = if monitor.pacing_info.enabled {
+        let jitter_info = if monitor.pacing_info.jitter_ms > 0 {
+            format!(" + {}ms jitter", monitor.pacing_info.jitter_ms)
+        } else {
+            "".to_string()
+        };
+        format!("{}  Message Pacing: {}ms{}", 
+               monitor.pacing_indicator(), 
+               monitor.pacing_info.interval_ms,
+               jitter_info)
+    } else {
+        format!("{}  Message Pacing: Disabled", monitor.pacing_indicator())
+    };
+    content.push(pacing_status);
+    
     // Anonymity set
     content.push(format!("{}  {} users in set", ICON_USERS, monitor.anonymity_set_size));
     
@@ -491,6 +508,12 @@ pub fn render_status_dashboard(state: &GameState) {
         content.push(format!("  {}  Latency: {}ms", ICON_BULLET, monitor.network_stats.avg_latency_ms));
         content.push(format!("  {}  Success: {:.1}%", ICON_BULLET, monitor.network_stats.delivery_success_rate()));
         content.push(format!("  {}  Loss: {:.1}%", ICON_BULLET, monitor.network_stats.packet_loss_percentage()));
+        
+        // Display pending messages count if there are any
+        let pending_count = monitor.pending_message_count();
+        if pending_count > 0 {
+            content.push(format!("  {}  Pending: {} messages", ICON_BULLET, pending_count));
+        }
         
         if let Some(last_comm) = monitor.network_stats.last_successful_communication {
             let elapsed = last_comm.elapsed().as_secs();
@@ -511,20 +534,23 @@ pub fn render_status_dashboard(state: &GameState) {
 /// Render help section with modern formatting
 pub fn render_help_section() {
     let commands = vec![
-        format!("{}  Available Commands:", ICON_INFO).bright_blue().bold().to_string(),
+        format!("{} NymQuest Commands:", ICON_INFO).bright_green().bold().to_string(),
         "".to_string(),
-        format!("{}  /register <name>, /r <name> - Register with the given name", ICON_BULLET),
-        format!("{}  /move <direction>, /m <direction>, /go <direction> - Move in a direction", ICON_BULLET),
+        format!("{} /register <name>, /r <name> - Register with the server using the specified name", ICON_BULLET),
+        format!("{} /move <direction>, /m <direction> - Move in the specified direction", ICON_BULLET),
+        "    Valid directions: up, down, left, right, upleft, upright, downleft, downright".to_string(),
         "    Direction shortcuts: /up (or /u, /n), /down (or /d, /s), /left (or /l, /w), /right (or /r, /e)".to_string(),
         "    Diagonal movement: /ne, /nw, /se, /sw - Move diagonally".to_string(),
-        format!("{}  /attack <player_id>, /a <player_id> - Attack player with the given display ID", ICON_BULLET),
-        format!("{}  /chat <message>, /c <message>, /say <message> - Send a chat message to all players", ICON_BULLET),
-        format!("{}  /emote <type>, /em <type> - Perform an emote action", ICON_BULLET),
+        format!("{} /attack <player_id>, /a <player_id> - Attack player with the given display ID", ICON_BULLET),
+        format!("{} /chat <message>, /c <message>, /say <message> - Send a chat message to all players", ICON_BULLET),
+        format!("{} /emote <type>, /em <type> - Perform an emote action", ICON_BULLET),
         "    Available emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap".to_string(),
-        format!("{}  /help, /h, /? - Show this help information", ICON_BULLET),
-        format!("{}  /quit, /exit, /q - Exit the game", ICON_BULLET),
+        format!("{} /pacing [on|off] [interval_ms], /pace - Control message pacing for privacy protection", ICON_BULLET),
+        "    Examples: /pacing on 150, /pacing off, /pacing status - View or modify timing protection".to_string(),
+        format!("{} /help, /h, /? - Show this help information", ICON_BULLET),
+        format!("{} /quit, /exit, /q - Exit the game", ICON_BULLET),
         "".to_string(),
-        format!("{}  Attack range: 28.0 units | Movement speed: 5.0 units per move", ICON_INFO).bright_green().to_string(),
+        format!("{} Attack range: 28.0 units | Movement speed: 5.0 units per move", ICON_INFO).bright_green().to_string(),
     ];
     
     draw_panel("🎮  COMMANDS", &commands, TERMINAL_WIDTH - 4, PanelStyle::Info);

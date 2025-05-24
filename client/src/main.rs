@@ -503,6 +503,59 @@ async fn process_user_command(
             }
             return Ok(());
         },
+        // Message pacing commands for privacy protection
+        "pacing" | "pace" => {
+            if command_parts.len() < 2 {
+                // Display current pacing status
+                let pacing_info = network.get_message_pacing();
+                info!("Message pacing status: {}", if pacing_info.0 { "Enabled".green() } else { "Disabled".red() });
+                if pacing_info.0 {
+                    info!("Base interval: {}ms, Last jitter: {}ms", pacing_info.1, pacing_info.2);
+                }
+                info!("Usage: /pacing [on|off] [interval_ms]");
+                info!("Example: /pacing on 150");
+                return Ok(());
+            }
+            
+            let subcommand = command_parts[1].to_lowercase();
+            match subcommand.as_str() {
+                "on" | "enable" => {
+                    // Get interval if provided
+                    let interval = if command_parts.len() >= 3 {
+                        match command_parts[2].parse::<u64>() {
+                            Ok(val) => val,
+                            Err(_) => {
+                                info!("Invalid interval value. Using default 100ms.");
+                                100
+                            }
+                        }
+                    } else {
+                        100 // Default interval
+                    };
+                    
+                    // Enable message pacing with specified interval
+                    network.set_message_pacing(true, interval);
+                    info!("Message pacing {} with {}ms interval", "enabled".green(), interval);
+                },
+                "off" | "disable" => {
+                    // Disable message pacing
+                    network.set_message_pacing(false, 0);
+                    info!("Message pacing {}", "disabled".red());
+                },
+                "status" => {
+                    // Display current pacing status
+                    let pacing_info = network.get_message_pacing();
+                    info!("Message pacing status: {}", if pacing_info.0 { "Enabled".green() } else { "Disabled".red() });
+                    if pacing_info.0 {
+                        info!("Base interval: {}ms, Last jitter: {}ms", pacing_info.1, pacing_info.2);
+                    }
+                },
+                _ => {
+                    info!("Unknown pacing subcommand: {}", subcommand);
+                    info!("Usage: /pacing [on|off] [interval_ms]");
+                }
+            }
+        },
         _ => {
             info!("Unknown command: {}", command_parts[0]);
             info!("Type {} for available commands", "/help".cyan());

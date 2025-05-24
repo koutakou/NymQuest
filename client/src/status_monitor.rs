@@ -96,6 +96,30 @@ impl NetworkStats {
     }
 }
 
+/// Information about message pacing for privacy protection
+#[derive(Debug, Clone)]
+pub struct PacingInfo {
+    /// Whether message pacing is enabled
+    pub enabled: bool,
+    /// Base pacing interval in milliseconds
+    pub interval_ms: u64,
+    /// Last jitter value applied in milliseconds
+    pub jitter_ms: u64,
+    /// Timestamp of last pacing update
+    pub last_update: Instant,
+}
+
+impl PacingInfo {
+    pub fn new() -> Self {
+        Self {
+            enabled: false,
+            interval_ms: 0,
+            jitter_ms: 0,
+            last_update: Instant::now(),
+        }
+    }
+}
+
 /// Main status monitor for tracking connection health and privacy
 #[derive(Debug, Clone)]
 pub struct StatusMonitor {
@@ -113,6 +137,8 @@ pub struct StatusMonitor {
     pub mixnet_connected: bool,
     /// Estimated anonymity set size (number of other users in mixnet)
     pub anonymity_set_size: u32,
+    /// Message pacing information
+    pub pacing_info: PacingInfo,
 }
 
 impl StatusMonitor {
@@ -125,7 +151,8 @@ impl StatusMonitor {
             connection_health: ConnectionHealth::Poor,
             last_update: Instant::now(),
             mixnet_connected: false,
-            anonymity_set_size: 1,
+            anonymity_set_size: 0,
+            pacing_info: PacingInfo::new(),
         }
     }
 
@@ -265,32 +292,51 @@ impl StatusMonitor {
         }
     }
 
-    /// Assess current privacy level based on mixnet status and connection health
+    /// Assess current privacy level based on mixnet status, connection health, and pacing
     fn assess_privacy_level(&self) -> PrivacyLevel {
         if !self.mixnet_connected {
             return PrivacyLevel::Compromised;
         }
+        
+        // Consider message pacing as a factor in privacy assessment
+        let has_pacing = self.pacing_info.enabled && self.pacing_info.interval_ms > 50;
         
         match self.connection_health {
             ConnectionHealth::Critical => PrivacyLevel::Compromised,
             ConnectionHealth::Poor => PrivacyLevel::Degraded,
             ConnectionHealth::Fair => {
                 if self.network_stats.estimated_hops >= 3 && self.anonymity_set_size > 10 {
-                    PrivacyLevel::Protected
+                    // Message pacing helps protect against timing analysis
+                    if has_pacing {
+                        PrivacyLevel::Protected
+                    } else {
+                        // Without message pacing, we're more vulnerable to timing attacks
+                        PrivacyLevel::Degraded
+                    }
                 } else {
                     PrivacyLevel::Degraded
                 }
             },
             ConnectionHealth::Good => {
                 if self.network_stats.estimated_hops >= 3 && self.anonymity_set_size > 50 {
-                    PrivacyLevel::FullyProtected
+                    // Message pacing is needed for full protection
+                    if has_pacing {
+                        PrivacyLevel::FullyProtected
+                    } else {
+                        PrivacyLevel::Protected
+                    }
                 } else {
                     PrivacyLevel::Protected
                 }
             },
             ConnectionHealth::Excellent => {
                 if self.network_stats.estimated_hops >= 3 && self.anonymity_set_size > 100 {
-                    PrivacyLevel::FullyProtected
+                    // Message pacing is needed for full protection
+                    if has_pacing {
+                        PrivacyLevel::FullyProtected
+                    } else {
+                        PrivacyLevel::Protected
+                    }
                 } else {
                     PrivacyLevel::Protected
                 }
@@ -319,6 +365,35 @@ impl StatusMonitor {
         }
     }
 
+    /// Update message pacing information
+    pub fn update_message_pacing(&mut self, enabled: bool, interval_ms: u64, jitter_ms: u64) {
+        self.pacing_info.enabled = enabled;
+        self.pacing_info.interval_ms = interval_ms;
+        self.pacing_info.jitter_ms = jitter_ms;
+        self.pacing_info.last_update = Instant::now();
+        
+        // Updating status potentially affects privacy level
+        self.update_status();
+    }
+    
+    /// Get current message pacing status
+    pub fn get_pacing_status(&self) -> (bool, u64, u64) {
+        (self.pacing_info.enabled, self.pacing_info.interval_ms, self.pacing_info.jitter_ms)
+    }
+    
+    /// Get a colored status indicator for message pacing
+    pub fn pacing_indicator(&self) -> ColoredString {
+        if self.pacing_info.enabled {
+            match self.pacing_info.interval_ms {
+                0..=50 => "⏱️".yellow(),      // Minimal pacing
+                51..=150 => "⏱️".cyan(),     // Moderate pacing
+                _ => "⏱️".green(),           // Strong pacing
+            }
+        } else {
+            "⏱️".red()                      // Disabled
+        }
+    }
+    
     /// Get human-readable description of current status
     pub fn status_description(&self) -> (String, String) {
         let health_desc = match self.connection_health {

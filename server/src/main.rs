@@ -98,8 +98,15 @@ async fn main() -> Result<()> {
     info!("Heartbeat: {}s interval, {}s timeout",
           game_config.heartbeat_interval_seconds, game_config.heartbeat_timeout_seconds);
     
-    // Configure Nym client
-    let config_dir = PathBuf::from("/tmp/nym_mmorpg_server");
+    // Configure Nym client with permanent storage location
+    let config_dir = dirs_next::data_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("nymquest").join("server").join("nym_storage");
+    
+    // Create directories if they don't exist
+    std::fs::create_dir_all(&config_dir)?;
+    
+    info!("Using permanent Nym storage location: {:?}", config_dir);
     let storage_paths = StoragePaths::new_from_dir(&config_dir)?;
     
     info!("Initializing Nym mixnet client");
@@ -211,9 +218,24 @@ async fn main() -> Result<()> {
         }
     }
     
-    // Create periodic tasks for game state maintenance
+    // Set up shutdown signal handler
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::mpsc::channel::<()>(1);
+    
+    // Set up ctrl+c handler for graceful shutdown
+    tokio::spawn(async move {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            error!("Failed to listen for ctrl+c: {}", e);
+            return;
+        }
+        info!("Received shutdown signal, initiating graceful shutdown...");
+        let _ = shutdown_tx.send(()).await;
+    });
+    
+    // Main event loop
+    info!("Server ready to receive connections");
     let mut heartbeat_interval = interval(Duration::from_secs(game_config.heartbeat_interval_seconds));
-    let mut cleanup_interval = interval(Duration::from_secs(game_config.heartbeat_timeout_seconds / 2));
+    let mut broadcast_interval = interval(Duration::from_secs(game_config.state_broadcast_interval_seconds));
+    let mut cleanup_interval = interval(Duration::from_secs(game_config.inactive_player_cleanup_interval_seconds));
     
     // Add persistence interval (save state every 2 minutes)
     let mut persistence_interval = interval(Duration::from_secs(120));
@@ -233,6 +255,29 @@ async fn main() -> Result<()> {
     // Main event loop with background task scheduling
     loop {
         tokio::select! {
+            // Handle shutdown signal
+            _ = shutdown_rx.recv() => {
+                info!("Processing shutdown sequence...");
+                
+                // Final state persistence
+                let players = game_state.get_players();
+                info!("Saving final game state...");
+                if let Err(e) = persistence.save_state(&players, &game_config).await {
+                    error!("Failed to save final game state during shutdown: {}", e);
+                } else {
+                    info!("Final game state saved successfully");
+                }
+                
+                // Send disconnect message to all players
+                info!("Notifying connected players of shutdown...");
+                if let Err(e) = broadcast_game_state(&client, &game_state, None, &auth_key).await {
+                    error!("Failed to send final state broadcast: {}", e);
+                }
+                
+                // Clean disconnect from mixnet
+                info!("Disconnecting from Nym mixnet...");
+                break;
+            },
             // Handle incoming messages from clients
             received_message = client.next() => {
                 match received_message {
@@ -281,17 +326,16 @@ async fn main() -> Result<()> {
         }
     }
     
-    info!("Server shutting down - performing final state save");
+    info!("Server is shutting down gracefully...");
     
-    // Perform final save before shutdown
-    let players = game_state.get_players();
-    if let Err(e) = persistence.save_state(&players, &game_config).await {
-        error!("Failed to save final game state: {}", e);
-    } else if !players.is_empty() {
-        info!("Final game state saved with {} players", players.len());
-    }
-
-    info!("Server shutting down");
+    // Final cleanup of rate limiter
+    let _ = cleanup_rate_limiter();
+    
+    // Disconnect from the mixnet (ensuring data is flushed)
+    client.disconnect().await;
+    info!("Successfully disconnected from Nym mixnet");
+    
+    info!("Server shutdown complete");
     
     // The client will be dropped naturally when main exits
     // No need to explicitly disconnect when using shared references
