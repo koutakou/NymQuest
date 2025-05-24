@@ -14,7 +14,7 @@ use tracing::{info, warn, error, debug, trace};
 // Import message authentication module
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
-use crate::game_protocol::{ClientMessage, ServerMessage, ServerMessageType, ClientMessageType, Direction, EmoteType};
+use crate::game_protocol::{ClientMessage, ServerMessage, ServerMessageType, ClientMessageType, Direction, EmoteType, ProtocolVersion};
 
 use crate::config::ClientConfig;
 
@@ -41,7 +41,7 @@ const MAX_BURST_SIZE: u32 = CLIENT_BURST_SIZE;
 /// Structure to hold original message content for potential resends
 #[derive(Clone)]
 pub enum OriginalMessage {
-    Register { name: String },
+    Register { name: String, protocol_version: ProtocolVersion },
     Move { direction: Direction },
     Attack { target_display_id: String },
     Chat { message: String },
@@ -65,6 +65,8 @@ pub struct NetworkManager {
     rate_limit_tokens: u32,
     /// Last time the rate limit was updated
     last_rate_limit_update: Instant,
+    /// Negotiated protocol version for this session
+    negotiated_protocol_version: Option<u16>,
 }
 
 impl NetworkManager {
@@ -124,6 +126,7 @@ impl NetworkManager {
             status_monitor,
             rate_limit_tokens: MAX_BURST_SIZE,
             last_rate_limit_update: Instant::now(),
+            negotiated_protocol_version: None,
         })
     }
     
@@ -158,8 +161,8 @@ impl NetworkManager {
         if let Some(client) = &mut self.client {
             // For all other message types, attach sequence number
             let message_with_seq = match message {
-                ClientMessage::Register { name, .. } => {
-                    ClientMessage::Register { name, seq_num }
+                ClientMessage::Register { name, protocol_version, .. } => {
+                    ClientMessage::Register { name, protocol_version, seq_num }
                 },
                 ClientMessage::Move { direction, .. } => {
                     ClientMessage::Move { direction, seq_num }
@@ -192,8 +195,8 @@ impl NetworkManager {
             
             // Store the original message content for potential resends
             let original = match &message_with_seq {
-                ClientMessage::Register { name, .. } => {
-                    OriginalMessage::Register { name: name.clone() }
+                ClientMessage::Register { name, protocol_version, .. } => {
+                    OriginalMessage::Register { name: name.clone(), protocol_version: protocol_version.clone() }
                 },
                 ClientMessage::Move { direction, .. } => {
                     OriginalMessage::Move { direction: *direction }
@@ -303,10 +306,11 @@ impl NetworkManager {
             // Get the original message content if available
             let message = if let Some(original) = self.original_messages.get(&seq_num) {
                 match original {
-                    OriginalMessage::Register { name } => {
+                    OriginalMessage::Register { name, protocol_version } => {
                         debug!("Resending Register with original name: {}", name);
                         ClientMessage::Register { 
                             name: name.clone(), 
+                            protocol_version: protocol_version.clone(), 
                             seq_num 
                         }
                     },
@@ -354,6 +358,7 @@ impl NetworkManager {
                     ClientMessageType::Register => {
                         ClientMessage::Register { 
                             name: format!("Resend_{}", seq_num), 
+                            protocol_version: ProtocolVersion::default(),
                             seq_num 
                         }
                     },
@@ -486,6 +491,12 @@ impl NetworkManager {
         // Process the server message
         let seq_num = server_message.get_seq_num();
         let msg_type = server_message.get_type();
+        
+        // Handle protocol version negotiation for RegisterAck
+        if let ServerMessage::RegisterAck { negotiated_version, .. } = &server_message {
+            self.negotiated_protocol_version = Some(*negotiated_version);
+            info!("Protocol version negotiated: v{}", negotiated_version);
+        }
                 
         // Handle explicit acknowledgements first
         if let ServerMessage::Ack { client_seq_num, original_type } = &server_message {
@@ -689,6 +700,11 @@ impl NetworkManager {
     /// Check if the client is connected
     pub fn is_connected(&self) -> bool {
         self.client.is_some()
+    }
+    
+    /// Get the negotiated protocol version for this session
+    pub fn get_negotiated_protocol_version(&self) -> Option<u16> {
+        self.negotiated_protocol_version
     }
     
     /// Get the next sequence number and increment the counter

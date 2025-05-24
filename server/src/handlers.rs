@@ -9,7 +9,7 @@ use tracing::{info, warn, error, debug, trace};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 
-use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType, WorldBoundaries, EmoteType};
+use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType, WorldBoundaries, EmoteType, ProtocolVersion};
 use crate::game_state::GameState;
 use crate::config::GameConfig;
 
@@ -393,8 +393,73 @@ pub async fn handle_client_message(
     
     // Process the message based on its type
     match message {
-        ClientMessage::Register { name, .. } => {
-            handle_register(client, game_state, name, sender_tag, auth_key, game_state.get_config()).await
+        ClientMessage::Register { name, seq_num, protocol_version } => {
+            // First, check protocol version compatibility
+            let server_version = ProtocolVersion::default();
+            let negotiated_version = match server_version.negotiate_with(&protocol_version) {
+                Some(version) => {
+                    info!("Protocol version negotiated: v{} (client: v{}, server: v{})", 
+                          version, protocol_version.current, server_version.current);
+                    version
+                },
+                None => {
+                    error!("Protocol version incompatible: client v{} (min: v{}), server v{} (min: v{})",
+                           protocol_version.current, protocol_version.min_supported,
+                           server_version.current, server_version.min_supported);
+                    
+                    // Send error message for incompatible version
+                    let error_msg = ServerMessage::Error {
+                        message: format!("Protocol version incompatible. Server supports v{}-v{}, client requested v{}-v{}",
+                                       server_version.min_supported, server_version.current,
+                                       protocol_version.min_supported, protocol_version.current),
+                        seq_num: next_seq_num(),
+                    };
+                    
+                    let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+                    let error_json = serde_json::to_string(&authenticated_error)?;
+                    client.send_reply(sender_tag, error_json).await?;
+                    
+                    return Ok(());
+                }
+            };
+
+            // Check if this sender_tag is already associated with a registered player
+            if let Some(existing_player_id) = game_state.get_player_id(&sender_tag) {
+                // Client is already registered, send an error message
+                let error_msg = ServerMessage::Error {
+                    message: format!("Player {} is already registered", existing_player_id),
+                    seq_num: next_seq_num(),
+                };
+                
+                let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+                let error_json = serde_json::to_string(&authenticated_error)?;
+                
+                client.send_reply(sender_tag, error_json).await?;
+                return Ok(());
+            }
+            
+            // Register the new player
+            let player_id = game_state.add_player(name, sender_tag);
+            
+            // Create a successful registration response with negotiated version
+            let register_ack = ServerMessage::RegisterAck {
+                player_id: player_id.clone(),
+                seq_num: next_seq_num(),
+                world_boundaries: WorldBoundaries::from_config(game_state.get_config()),
+                negotiated_version,
+            };
+            
+            let authenticated_ack = AuthenticatedMessage::new(register_ack, auth_key)?;
+            let register_ack_json = serde_json::to_string(&authenticated_ack)?;
+            
+            // Send the registration confirmation to the new player
+            client.send_reply(sender_tag.clone(), register_ack_json).await?;
+            
+            // Broadcast updated game state to all players
+            broadcast_game_state(client, game_state, None, auth_key).await?;
+            
+            info!("New player registered: {} (protocol v{})", player_id, negotiated_version);
+            Ok(())
         },
         ClientMessage::Move { direction, .. } => {
             handle_move(client, game_state, direction, sender_tag, auth_key).await
@@ -433,58 +498,6 @@ pub async fn handle_client_message(
             Ok(())
         },
     }
-}
-
-/// Handle player registration
-async fn handle_register(
-    client: &MixnetClient,
-    game_state: &Arc<GameState>,
-    name: String,
-    sender_tag: AnonymousSenderTag,
-    auth_key: &AuthKey,
-    config: &GameConfig,
-) -> Result<()> {
-    // Check if this sender_tag is already associated with a registered player
-    if let Some(existing_player_id) = game_state.get_player_id(&sender_tag) {
-        // Client is already registered, send an error message
-        let error_msg = ServerMessage::Error { 
-            message: "You are already registered. Please disconnect first before registering again.".to_string(),
-            seq_num: next_seq_num()
-        };
-        
-        // Create an authenticated message
-        let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
-        let error_json = serde_json::to_string(&authenticated_error)?;
-        
-        // Send the error message to the client
-        client.send_reply(sender_tag.clone(), error_json).await?;
-        
-        info!("Registration attempt rejected: Client already registered as {}", existing_player_id);
-        return Ok(());
-    }
-    
-    // Add the player to the game state
-    let player_id = game_state.add_player(name, sender_tag.clone());
-    
-    // Create a welcome message for this player
-    let register_ack = ServerMessage::RegisterAck {
-        player_id: player_id.clone(),
-        seq_num: next_seq_num(),
-        world_boundaries: WorldBoundaries::from_config(config),
-    };
-    
-    // Create an authenticated message
-    let authenticated_ack = AuthenticatedMessage::new(register_ack, auth_key)?;
-    let register_ack_json = serde_json::to_string(&authenticated_ack)?;
-    
-    // Send the registration confirmation to the new player
-    client.send_reply(sender_tag.clone(), register_ack_json).await?;
-    
-    // Broadcast updated game state to all players
-    broadcast_game_state(client, game_state, None, auth_key).await?;
-    
-    info!("New player registered: {}", player_id);
-    Ok(())
 }
 
 /// Handle player movement

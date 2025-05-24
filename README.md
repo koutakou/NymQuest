@@ -154,13 +154,57 @@ The client includes a comprehensive status monitoring system that provides real-
 
 This monitoring system enhances user awareness while preserving the core privacy guarantees of the Nym mixnet.
 
-### Configuration
+### 🔧 Technical Features
 
-All timing and persistence parameters are configurable via environment variables:
-- `NYMQUEST_HEARTBEAT_INTERVAL_SECONDS`: Frequency of heartbeat requests (default: 30s)
-- `NYMQUEST_HEARTBEAT_TIMEOUT_SECONDS`: Player inactivity timeout (default: 90s)
-- `NYMQUEST_ENABLE_PERSISTENCE`: Enable game state persistence (default: true)
-- `NYMQUEST_PERSISTENCE_DIR`: Directory for saving game state (default: "./game_data")
+### Core Components
+- **Client**: Terminal-based UI with intuitive controls for movement and interaction
+- **Server**: Async game state management with persistence and real-time updates
+- **Protocol**: Custom message protocol for game actions and events
+- **Authentication**: HMAC-SHA256 message authentication to prevent tampering
+- **Privacy**: All communications routed through Nym mixnet for enhanced anonymity
+- **Protocol Versioning**: Backward-compatible versioning system for protocol evolution
+
+### Security & Privacy
+- **Nym Mixnet Integration**: All communications are routed through the Nym network for metadata privacy
+- **Message Authentication**: HMAC-SHA256 ensures message integrity and prevents tampering
+- **Rate Limiting**: Token bucket algorithm prevents DoS attacks while preserving privacy
+- **Replay Protection**: Sliding window mechanism prevents message replay attacks
+- **Connection Health**: Automatic heartbeat system monitors connection status
+- **Protocol Negotiation**: Version compatibility checking ensures smooth upgrades
+
+### Performance & Reliability
+- **Async Architecture**: Built on Tokio for high-performance async operations
+- **Graceful Degradation**: Robust error handling and connection recovery
+- **Resource Management**: Automatic cleanup of inactive connections and rate limiters
+- **Configurable Parameters**: Environment-based configuration for flexible deployment
+
+### Protocol Versioning System
+NymQuest implements a robust protocol versioning system that enables backward compatibility and smooth upgrades:
+
+#### Version Negotiation Process
+1. **Client Connection**: When registering, clients send their supported protocol version range
+2. **Server Compatibility Check**: Server validates client version against its own supported range
+3. **Version Selection**: If compatible, the highest common version is negotiated
+4. **Session Establishment**: Both client and server use the negotiated version for the session
+
+#### Compatibility Rules
+- **Current Version**: The latest protocol version with all features enabled
+- **Minimum Supported**: The oldest version that can still be served
+- **Negotiation**: Uses the lower of both current versions if ranges overlap
+- **Rejection**: Incompatible clients receive clear error messages
+
+#### Version Evolution
+```rust
+// Protocol version constants
+pub const PROTOCOL_VERSION: u16 = 1;        // Current version
+pub const MIN_SUPPORTED_VERSION: u16 = 1;   // Minimum supported
+```
+
+This system ensures that:
+- New features can be added without breaking existing clients
+- Legacy clients continue to work during gradual upgrades
+- Clear compatibility feedback prevents connection issues
+- Future protocol evolution is supported from day one
 
 ## Getting Started
 

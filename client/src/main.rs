@@ -22,7 +22,7 @@ use command_completer::GameHistoryHinter;
 use ui_components::render_help_section;
 use config::ClientConfig;
 
-use game_protocol::{ClientMessage, ServerMessage, Direction, Position};
+use game_protocol::{ClientMessage, ServerMessage, Direction, Position, ProtocolVersion};
 use game_state::GameState;
 use network::NetworkManager;
 use ui_components::{render_game_state, clear_screen, draw_panel, format_chat_message};
@@ -274,6 +274,7 @@ async fn process_user_command(
             // Create register message (sequence number handled by NetworkManager)
             let register_msg = ClientMessage::Register { 
                 name, 
+                protocol_version: ProtocolVersion::default(),
                 seq_num: 0 // Placeholder, will be replaced by NetworkManager
             };
             
@@ -666,7 +667,7 @@ fn process_server_message(game_state: &Arc<Mutex<GameState>>, server_message: Se
     };
     
     let needs_refresh = match server_message.clone() {
-        ServerMessage::RegisterAck { player_id, world_boundaries, seq_num: _ } => {
+        ServerMessage::RegisterAck { player_id, world_boundaries, negotiated_version, seq_num: _ } => {
             state.set_player_id(player_id);
             state.set_world_boundaries(world_boundaries);
             info!("Registration successful! Received world boundaries from server.");

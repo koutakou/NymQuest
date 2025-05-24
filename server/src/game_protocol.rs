@@ -2,6 +2,45 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::time::Duration;
 
+/// Current protocol version - increment when making breaking changes
+pub const PROTOCOL_VERSION: u16 = 1;
+
+/// Minimum supported protocol version for backward compatibility
+pub const MIN_SUPPORTED_VERSION: u16 = 1;
+
+/// Protocol version information exchanged during connection setup
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ProtocolVersion {
+    pub current: u16,
+    pub min_supported: u16,
+}
+
+impl Default for ProtocolVersion {
+    fn default() -> Self {
+        Self {
+            current: PROTOCOL_VERSION,
+            min_supported: MIN_SUPPORTED_VERSION,
+        }
+    }
+}
+
+impl ProtocolVersion {
+    /// Check if this version is compatible with another version
+    pub fn is_compatible_with(&self, other: &ProtocolVersion) -> bool {
+        // We can communicate if our ranges overlap
+        self.min_supported <= other.current && other.min_supported <= self.current
+    }
+
+    /// Get the negotiated version to use (highest common version)
+    pub fn negotiate_with(&self, other: &ProtocolVersion) -> Option<u16> {
+        if !self.is_compatible_with(other) {
+            return None;
+        }
+        // Use the lower of the two current versions
+        Some(self.current.min(other.current))
+    }
+}
+
 // Player's position in the game world
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub struct Position {
@@ -59,8 +98,12 @@ pub enum ClientMessageType {
 // Message types that the client can send to the server
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientMessage {
-    // Message to register in the game
-    Register { name: String, seq_num: u64 },
+    // Message to register in the game with protocol version negotiation
+    Register { 
+        name: String, 
+        seq_num: u64,
+        protocol_version: ProtocolVersion,
+    },
     // Message to move in the game world
     Move { direction: Direction, seq_num: u64 },
     // Message to attack another player (using display_id for privacy)
@@ -94,12 +137,14 @@ pub enum ServerMessageType {
 // Message types that the server can send to the client
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ServerMessage {
-    // Confirms registration and provides the player ID
+    // Confirms registration and provides the player ID with protocol version negotiation
     RegisterAck { 
         player_id: String, 
         seq_num: u64,
         // World boundaries for client synchronization
         world_boundaries: WorldBoundaries,
+        // Negotiated protocol version to use for this session
+        negotiated_version: u16,
     },
     // Game state update
     GameState { 
