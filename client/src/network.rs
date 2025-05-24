@@ -29,6 +29,14 @@ const SUBSEQUENT_ACK_TIMEOUT_MS: u64 = 2000;
 /// Maximum number of retries for sending a message
 const MAX_RETRIES: usize = 3;
 
+/// Client-side rate limiting to prevent hitting server limits
+/// Default: slightly lower than server limits to add safety margin
+const CLIENT_RATE_LIMIT_PER_SEC: f32 = 8.0; // Slightly below server default of 10
+const CLIENT_BURST_SIZE: u32 = 15; // Slightly below server default of 20
+
+/// Maximum number of messages to send in a burst before enforcing rate limit
+const MAX_BURST_SIZE: u32 = CLIENT_BURST_SIZE;
+
 /// NetworkManager handles all interactions with the Nym mixnet
 /// Structure to hold original message content for potential resends
 #[derive(Clone)]
@@ -53,6 +61,10 @@ pub struct NetworkManager {
     original_messages: HashMap<u64, OriginalMessage>,
     config: ClientConfig,
     status_monitor: Arc<Mutex<StatusMonitor>>,
+    /// Token bucket for rate limiting
+    rate_limit_tokens: u32,
+    /// Last time the rate limit was updated
+    last_rate_limit_update: Instant,
 }
 
 impl NetworkManager {
@@ -110,6 +122,8 @@ impl NetworkManager {
             original_messages: HashMap::new(),
             config: config.clone(),
             status_monitor,
+            rate_limit_tokens: MAX_BURST_SIZE,
+            last_rate_limit_update: Instant::now(),
         })
     }
     
@@ -118,8 +132,8 @@ impl NetworkManager {
         // Handle acknowledgment messages without adding sequence numbers
         if let ClientMessage::Ack { .. } = message {
             if let Some(client) = &mut self.client {
-                let authenticated_message = AuthenticatedMessage::new(message, &self.auth_key)?;
-                let message_str = serde_json::to_string(&authenticated_message)?;
+                let authenticated_msg = AuthenticatedMessage::new(message, &self.auth_key)?;
+                let message_str = serde_json::to_string(&authenticated_msg)?;
                 debug!("Sending acknowledgment message");
                 let recipient = Recipient::from_str(&self.server_address)
                     .map_err(|e| anyhow!("Invalid server address: {}", e))?;
@@ -130,6 +144,16 @@ impl NetworkManager {
 
         // Get the next sequence number before borrowing client
         let seq_num = self.next_seq_num();
+        
+        // Check rate limit before processing
+        if !self.check_rate_limit() {
+            warn!("Rate limit exceeded, delaying message send");
+            // Wait until rate limit is restored before sending
+            self.wait_for_rate_limit().await?;
+        }
+        
+        // Consume a token for this message
+        self.rate_limit_tokens = self.rate_limit_tokens.saturating_sub(1);
         
         if let Some(client) = &mut self.client {
             // For all other message types, attach sequence number
@@ -195,16 +219,18 @@ impl NetworkManager {
             // Store the original message
             self.original_messages.insert(seq_num, original);
             
-            // Authenticate and serialize the message
-            let authenticated_message = AuthenticatedMessage::new(message_with_seq, &self.auth_key)?;
-            let message_str = serde_json::to_string(&authenticated_message)?;
+            // Create authenticated message 
+            let authenticated_msg = AuthenticatedMessage::new(message_with_seq.clone(), &self.auth_key)?;
+            let message_str = serde_json::to_string(&authenticated_msg)?;
             
             // Create recipient from server address
-            let recipient = Recipient::from_str(&self.server_address)
-                .map_err(|e| anyhow!("Invalid server address: {}", e))?;
+            let server_address = match Recipient::from_str(&self.server_address) {
+                Ok(addr) => addr,
+                Err(e) => return Err(anyhow!("Invalid server address: {}", e)),
+            };
             
             debug!("Sending message with seq_num: {}", seq_num);
-            client.send_message(recipient, message_str.into_bytes(), IncludedSurbs::default()).await?;
+            client.send_message(server_address, message_str.into_bytes(), IncludedSurbs::default()).await?;
             
             // Update status monitor to record message sent
             if let Ok(mut monitor) = self.status_monitor.lock() {
@@ -373,8 +399,8 @@ impl NetworkManager {
             // Authenticate, serialize and send the message
             if let Some(client) = &mut self.client {
                 // Create an authenticated message with HMAC tag
-                let authenticated_message = AuthenticatedMessage::new(message, &self.auth_key)?;
-                let message_str = serde_json::to_string(&authenticated_message)?;
+                let authenticated_msg = AuthenticatedMessage::new(message, &self.auth_key)?;
+                let message_str = serde_json::to_string(&authenticated_msg)?;
                 
                 // Create recipient from server address
                 let recipient = Recipient::from_str(&self.server_address)
@@ -670,5 +696,27 @@ impl NetworkManager {
         let seq = self.seq_counter;
         self.seq_counter = seq + 1;
         seq
+    }
+    
+    /// Check if the rate limit has been exceeded
+    fn check_rate_limit(&mut self) -> bool {
+        let elapsed = self.last_rate_limit_update.elapsed().as_secs_f32();
+        let tokens_to_add = (elapsed * CLIENT_RATE_LIMIT_PER_SEC) as u32;
+        self.rate_limit_tokens = self.rate_limit_tokens.saturating_add(tokens_to_add);
+        self.rate_limit_tokens = self.rate_limit_tokens.min(MAX_BURST_SIZE);
+        self.last_rate_limit_update = Instant::now();
+        
+        self.rate_limit_tokens > 0
+    }
+    
+    /// Wait until the rate limit is restored
+    async fn wait_for_rate_limit(&mut self) -> Result<()> {
+        let wait_time = (MAX_BURST_SIZE as f32 / CLIENT_RATE_LIMIT_PER_SEC) - self.last_rate_limit_update.elapsed().as_secs_f32();
+        if wait_time > 0.0 {
+            time::sleep(Duration::from_secs_f32(wait_time)).await;
+        }
+        self.rate_limit_tokens = MAX_BURST_SIZE;
+        self.last_rate_limit_update = Instant::now();
+        Ok(())
     }
 }

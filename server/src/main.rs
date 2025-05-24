@@ -8,7 +8,7 @@ mod persistence;
 
 use game_protocol::{Player, Position, ClientMessage, ServerMessage};
 use game_state::GameState;
-use handlers::{handle_client_message, broadcast_game_state, send_heartbeat_requests, cleanup_inactive_players};
+use handlers::{handle_client_message, broadcast_game_state, send_heartbeat_requests, cleanup_inactive_players, init_rate_limiter, cleanup_rate_limiter};
 use utils::save_server_address;
 use message_auth::{AuthKey, AuthenticatedMessage};
 use config::GameConfig;
@@ -82,6 +82,9 @@ async fn main() -> Result<()> {
             return Err(e);
         }
     };
+    
+    // Initialize rate limiter
+    init_rate_limiter(&game_config);
     
     // Log key configuration values for debugging
     info!("World boundaries: ({:.1}, {:.1}) to ({:.1}, {:.1})", 
@@ -214,10 +217,14 @@ async fn main() -> Result<()> {
     // Add persistence interval (save state every 2 minutes)
     let mut persistence_interval = interval(Duration::from_secs(120));
     
+    // Add rate limiter cleanup interval (cleanup every 5 minutes)
+    let mut rate_limiter_cleanup_interval = interval(Duration::from_secs(300));
+    
     // Skip the first tick to avoid immediate execution
     heartbeat_interval.tick().await;
     cleanup_interval.tick().await;
     persistence_interval.tick().await;
+    rate_limiter_cleanup_interval.tick().await;
 
     // Main event loop with background task scheduling
     loop {
@@ -260,6 +267,12 @@ async fn main() -> Result<()> {
                 } else if !players.is_empty() {
                     debug!("Periodically saved game state with {} players", players.len());
                 }
+            },
+            
+            // Clean up rate limiter periodically
+            _ = rate_limiter_cleanup_interval.tick() => {
+                cleanup_rate_limiter();
+                debug!("Performed rate limiter cleanup");
             }
         }
     }

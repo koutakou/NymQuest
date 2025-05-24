@@ -1,5 +1,5 @@
 use anyhow::Result;
-use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender};
+use nym_sdk::mixnet::{MixnetClient, AnonymousSenderTag, MixnetMessageSender, Recipient};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -12,6 +12,93 @@ use crate::message_auth::{AuthKey, AuthenticatedMessage};
 use crate::game_protocol::{ClientMessage, ServerMessage, Direction, Position, ClientMessageType, ServerMessageType, WorldBoundaries, EmoteType};
 use crate::game_state::GameState;
 use crate::config::GameConfig;
+
+/// Token bucket rate limiter for DoS protection
+/// Tracks rate limits per connection to prevent spam while preserving privacy
+#[derive(Debug, Clone)]
+struct TokenBucket {
+    tokens: f32,
+    max_tokens: u32,
+    refill_rate: f32, // tokens per second
+    last_refill: SystemTime,
+}
+
+impl TokenBucket {
+    fn new(max_tokens: u32, refill_rate: f32) -> Self {
+        Self {
+            tokens: max_tokens as f32,
+            max_tokens,
+            refill_rate,
+            last_refill: SystemTime::now(),
+        }
+    }
+    
+    /// Attempt to consume a token, returns true if successful
+    fn try_consume(&mut self) -> bool {
+        self.refill_tokens();
+        
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+    
+    /// Refill tokens based on elapsed time
+    fn refill_tokens(&mut self) {
+        let now = SystemTime::now();
+        if let Ok(elapsed) = now.duration_since(self.last_refill) {
+            let elapsed_secs = elapsed.as_secs_f32();
+            let new_tokens = elapsed_secs * self.refill_rate;
+            self.tokens = (self.tokens + new_tokens).min(self.max_tokens as f32);
+            self.last_refill = now;
+        }
+    }
+}
+
+/// Rate limiter manager for all connections
+/// Maps connection tags to token buckets for privacy-preserving rate limiting
+#[derive(Debug)]
+struct RateLimiter {
+    buckets: HashMap<String, TokenBucket>,
+    max_tokens: u32,
+    refill_rate: f32,
+}
+
+impl RateLimiter {
+    fn new(config: &GameConfig) -> Self {
+        Self {
+            buckets: HashMap::new(),
+            max_tokens: config.message_burst_size,
+            refill_rate: config.message_rate_limit,
+        }
+    }
+    
+    /// Check if a message from this connection should be allowed
+    /// Returns true if allowed, false if rate limited
+    fn check_rate_limit(&mut self, connection_id: &str) -> bool {
+        let bucket = self.buckets.entry(connection_id.to_string())
+            .or_insert_with(|| TokenBucket::new(self.max_tokens, self.refill_rate));
+        
+        bucket.try_consume()
+    }
+    
+    /// Clean up old buckets to prevent memory leaks
+    /// This should be called periodically
+    fn cleanup_old_buckets(&mut self) {
+        const CLEANUP_THRESHOLD_SECS: u64 = 300; // 5 minutes
+        let now = SystemTime::now();
+        
+        self.buckets.retain(|_, bucket| {
+            if let Ok(elapsed) = now.duration_since(bucket.last_refill) {
+                elapsed.as_secs() < CLEANUP_THRESHOLD_SECS
+            } else {
+                true // Keep if we can't determine elapsed time
+            }
+        });
+    }
+}
 
 // Helper function to convert Direction to a human-readable string
 fn print_direction(direction: &Direction) -> &'static str {
@@ -230,6 +317,31 @@ pub async fn broadcast_game_state(
     Ok(())
 }
 
+/// Global rate limiter instance for DoS protection
+/// Uses lazy_static to ensure thread-safe initialization
+lazy_static::lazy_static! {
+    static ref GLOBAL_RATE_LIMITER: Arc<Mutex<Option<RateLimiter>>> = Arc::new(Mutex::new(None));
+}
+
+/// Initialize the global rate limiter with game configuration
+/// This should be called once during server startup
+pub fn init_rate_limiter(config: &GameConfig) {
+    let mut limiter = GLOBAL_RATE_LIMITER.lock().unwrap();
+    *limiter = Some(RateLimiter::new(config));
+    info!("Rate limiter initialized: {:.1} msg/sec, burst: {}", 
+          config.message_rate_limit, config.message_burst_size);
+}
+
+/// Clean up old rate limiting buckets
+/// This should be called periodically to prevent memory leaks
+pub fn cleanup_rate_limiter() {
+    if let Ok(mut limiter_guard) = GLOBAL_RATE_LIMITER.lock() {
+        if let Some(ref mut limiter) = *limiter_guard {
+            limiter.cleanup_old_buckets();
+        }
+    }
+}
+
 /// Handle a message from a client
 pub async fn handle_client_message(
     client: &MixnetClient,
@@ -238,6 +350,28 @@ pub async fn handle_client_message(
     sender_tag: AnonymousSenderTag,
     auth_key: &AuthKey
 ) -> Result<()> {
+    // Check rate limit
+    if let Ok(mut limiter_guard) = GLOBAL_RATE_LIMITER.lock() {
+        if let Some(ref mut limiter) = *limiter_guard {
+            if !limiter.check_rate_limit(&sender_tag.to_string()) {
+                warn!("Rate limit exceeded for connection {}", sender_tag);
+                
+                // Send rate limit error to client
+                let error_msg = ServerMessage::Error { 
+                    message: "Rate limit exceeded. Please slow down your message frequency.".to_string(),
+                    seq_num: next_seq_num()
+                };
+                let authenticated_response = AuthenticatedMessage::new(error_msg, auth_key)?;
+                let response_str = serde_json::to_string(&authenticated_response)?;
+                
+                // Send reply to the rate-limited client
+                let _ = client.send_reply(sender_tag.clone(), response_str).await;
+                
+                return Ok(());
+            }
+        }
+    }
+    
     // Get sequence number for replay protection and acknowledgments
     let seq_num = message.get_seq_num();
     
@@ -315,7 +449,7 @@ async fn handle_register(
         // Client is already registered, send an error message
         let error_msg = ServerMessage::Error { 
             message: "You are already registered. Please disconnect first before registering again.".to_string(),
-            seq_num: next_seq_num(),
+            seq_num: next_seq_num()
         };
         
         // Create an authenticated message

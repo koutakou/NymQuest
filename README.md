@@ -87,6 +87,48 @@ Persistence features:
 - **Graceful degradation** when persistence is disabled
 - **Position validation** to handle world boundary changes
 
+### DoS Protection & Rate Limiting
+
+NymQuest implements a comprehensive rate limiting system to prevent abuse while maintaining privacy:
+
+#### Server-Side Rate Limiting
+- **Token bucket algorithm**: Manages message rates per connection without tracking identities
+- **Privacy-preserving**: Rate limits are applied per mixnet connection tag, not user identity
+- **Configurable limits**: Environment variables control message rates and burst capacity
+- **Graceful handling**: Rate-limited clients receive informative error messages
+- **Memory efficient**: Automatic cleanup of old rate limiting buckets
+
+#### Rate Limiting Configuration
+
+The server rate limiting can be configured via environment variables:
+
+```bash
+# Message rate limit (messages per second per connection)
+export NYMQUEST_MESSAGE_RATE_LIMIT=10.0
+
+# Maximum burst size (messages that can be sent rapidly)
+export NYMQUEST_MESSAGE_BURST_SIZE=20
+```
+
+Default values:
+- **Rate limit**: 10 messages per second per connection
+- **Burst size**: 20 messages maximum in rapid succession
+- **Cleanup interval**: 5 minutes for unused buckets
+
+#### Client-Side Awareness
+
+The client includes rate limiting awareness to prevent hitting server limits:
+- **Proactive throttling**: Client maintains its own token bucket (8 msg/sec, 15 burst)
+- **Automatic backoff**: Delays sending when approaching limits
+- **Seamless user experience**: Rate limiting works transparently
+
+#### Security Benefits
+
+- **DoS prevention**: Protects against message flooding attacks
+- **Resource conservation**: Prevents server overload from rapid message bursts
+- **Fair usage**: Ensures all players have equal access to server resources
+- **Anonymity preservation**: No identity tracking in rate limiting implementation
+
 ### Client-Side Status Monitoring
 
 The client includes a comprehensive status monitoring system that provides real-time visibility into connection health and privacy status while maintaining anonymity:

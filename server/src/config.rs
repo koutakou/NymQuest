@@ -22,6 +22,8 @@ use tracing::{info, warn};
 /// - NYMQUEST_ATTACK_RANGE: Attack range in world units (default: 28.0)
 /// - NYMQUEST_ENABLE_PERSISTENCE: Enable game state persistence (default: true)
 /// - NYMQUEST_PERSISTENCE_DIR: Directory for saving game state (default: "./game_data")
+/// - NYMQUEST_MESSAGE_RATE_LIMIT: Messages per second limit per connection (default: 10)
+/// - NYMQUEST_MESSAGE_BURST_SIZE: Maximum burst size for rate limiting (default: 20)
 #[derive(Debug, Clone)]
 pub struct GameConfig {
     /// Maximum X coordinate boundary for the game world
@@ -58,6 +60,14 @@ pub struct GameConfig {
     pub crit_chance: f32,
     /// Critical hit damage multiplier
     pub crit_multiplier: f32,
+    /// Enable game state persistence
+    pub enable_persistence: bool,
+    /// Directory for storing persistent game data
+    pub persistence_dir: String,
+    /// Rate limit for messages per second per connection (DoS protection)
+    pub message_rate_limit: f32,
+    /// Maximum burst size for rate limiting (number of tokens in bucket)
+    pub message_burst_size: u32,
 }
 
 impl Default for GameConfig {
@@ -80,6 +90,10 @@ impl Default for GameConfig {
             base_damage: 10,
             crit_chance: 0.15, // 15% chance
             crit_multiplier: 2.0, // 2x damage
+            enable_persistence: true,
+            persistence_dir: "./game_data".to_string(),
+            message_rate_limit: 10.0,
+            message_burst_size: 20,
         }
     }
 }
@@ -108,6 +122,25 @@ impl GameConfig {
         config.crit_chance = Self::load_env_f32("NYMQUEST_CRIT_CHANCE", config.crit_chance)?;
         config.crit_multiplier = Self::load_env_f32("NYMQUEST_CRIT_MULTIPLIER", config.crit_multiplier)?;
         
+        // Persistence settings
+        let enable_persistence = Self::parse_env_bool("NYMQUEST_ENABLE_PERSISTENCE", true);
+        let persistence_dir = env::var("NYMQUEST_PERSISTENCE_DIR")
+            .unwrap_or_else(|_| "./game_data".to_string());
+        
+        // Rate limiting settings
+        let message_rate_limit = Self::load_env_f32("NYMQUEST_MESSAGE_RATE_LIMIT", 10.0)?;
+        let message_burst_size = Self::load_env_u32("NYMQUEST_MESSAGE_BURST_SIZE", 20)?;
+        
+        // Validate rate limiting settings
+        if message_rate_limit <= 0.0 {
+            return Err(anyhow!("Message rate limit must be positive, got: {}", message_rate_limit));
+        }
+        if message_burst_size == 0 {
+            return Err(anyhow!("Message burst size must be positive, got: {}", message_burst_size));
+        }
+        
+        info!("Rate limiting: {:.1} msg/sec, burst: {}", message_rate_limit, message_burst_size);
+
         // Validate configuration
         config.validate()?;
         
@@ -121,7 +154,29 @@ impl GameConfig {
         info!("Max players: {}, Max name length: {}, Max chat length: {}", 
               config.max_players, config.max_player_name_length, config.max_chat_message_length);
         
-        Ok(config)
+        Ok(GameConfig {
+            world_max_x: config.world_max_x,
+            world_min_x: config.world_min_x,
+            world_max_y: config.world_max_y,
+            world_min_y: config.world_min_y,
+            movement_speed: config.movement_speed,
+            max_player_name_length: config.max_player_name_length,
+            max_chat_message_length: config.max_chat_message_length,
+            heartbeat_interval_seconds: config.heartbeat_interval_seconds,
+            heartbeat_timeout_seconds: config.heartbeat_timeout_seconds,
+            max_players: config.max_players,
+            attack_cooldown_seconds: config.attack_cooldown_seconds,
+            initial_player_health: config.initial_player_health,
+            attack_damage: config.attack_damage,
+            attack_range: config.attack_range,
+            base_damage: config.base_damage,
+            crit_chance: config.crit_chance,
+            crit_multiplier: config.crit_multiplier,
+            enable_persistence,
+            persistence_dir,
+            message_rate_limit,
+            message_burst_size,
+        })
     }
     
     /// Validate the configuration values for consistency and safety
@@ -275,6 +330,19 @@ impl GameConfig {
                     .map_err(|e| anyhow!("Invalid usize value for {}: {} ({})", var_name, val, e))
             },
             Err(_) => Ok(default),
+        }
+    }
+    
+    fn parse_env_bool(var_name: &str, default: bool) -> bool {
+        match env::var(var_name) {
+            Ok(val) => {
+                match val.to_lowercase().as_str() {
+                    "true" => true,
+                    "false" => false,
+                    _ => default,
+                }
+            },
+            Err(_) => default,
         }
     }
 }
