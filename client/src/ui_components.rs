@@ -341,9 +341,24 @@ pub fn render_mini_map(state: &GameState, current_position: Option<&Position>) {
 
     // Place players
     let current_player_id = state.player_id.clone();
+
+    // Get world boundaries for accurate positioning
+    let (min_x, max_x, min_y, max_y) = if let Some(boundaries) = state.get_world_boundaries() {
+        (
+            boundaries.min_x,
+            boundaries.max_x,
+            boundaries.min_y,
+            boundaries.max_y,
+        )
+    } else {
+        // Fallback to default values if boundaries aren't available
+        (0.0, 100.0, 0.0, 100.0)
+    };
+
     for (id, player) in &state.players {
-        let norm_x = (player.position.x - 0.0) / (100.0 - 0.0);
-        let norm_y = (player.position.y - 0.0) / (100.0 - 0.0);
+        // Normalize positions using actual world boundaries
+        let norm_x = (player.position.x - min_x) / (max_x - min_x);
+        let norm_y = (player.position.y - min_y) / (max_y - min_y);
 
         let map_x = (norm_x * (MAP_SIZE - 2) as f32) as usize + 1;
         let map_y = (norm_y * (MAP_SIZE - 2) as f32) as usize + 1;
@@ -366,7 +381,7 @@ pub fn render_mini_map(state: &GameState, current_position: Option<&Position>) {
     // World info
     map_content.push(format!(
         "{} World: X[{:.0},{:.0}] Y[{:.0},{:.0}]",
-        ICON_LOCATION, 0.0, 100.0, 0.0, 100.0
+        ICON_LOCATION, min_x, max_x, min_y, max_y
     ));
     map_content.push(format!(
         "{} Position: ({:.1}, {:.1})",

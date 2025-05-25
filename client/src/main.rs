@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
 use tokio::{task, time};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter, Layer};
 
 use command_completer::GameHistoryHinter;
@@ -1018,8 +1018,34 @@ fn process_server_message(
             // Player left messages update the game state but don't need special UI refresh
             false
         }
-        ServerMessage::PlayerUpdate { .. } => {
-            // Player updates are handled by GameState updates
+        ServerMessage::PlayerUpdate {
+            display_id,
+            position,
+            health,
+            seq_num: _,
+        } => {
+            if let Ok(mut state) = game_state.lock() {
+                // Find the player with matching display_id and update their position and health
+                let player_id_to_update = state.get_player_id_by_display_id(&display_id);
+
+                if let Some(player_id) = player_id_to_update {
+                    if let Some(player) = state.players.get_mut(&player_id) {
+                        player.position = position;
+                        player.health = health;
+                        state.update_timestamp(); // Mark state as updated
+
+                        debug!(
+                            "Updated player {}: position ({}, {}), health {}",
+                            display_id, position.x, position.y, health
+                        );
+
+                        // Force a UI refresh to update the minimap
+                        return true;
+                    }
+                }
+            } else {
+                error!("Failed to update player position for {}", display_id);
+            }
             false
         }
     }
