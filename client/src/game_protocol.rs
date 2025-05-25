@@ -371,6 +371,7 @@ pub enum EmoteType {
     Shrug,
     Cheer,
     Clap,
+    ThumbsUp,
 }
 
 impl EmoteType {
@@ -386,6 +387,7 @@ impl EmoteType {
             EmoteType::Shrug => "shrugs shoulders",
             EmoteType::Cheer => "cheers enthusiastically",
             EmoteType::Clap => "claps hands",
+            EmoteType::ThumbsUp => "gives a thumbs up",
         }
     }
 
@@ -401,6 +403,7 @@ impl EmoteType {
             EmoteType::Shrug => "🤷",
             EmoteType::Cheer => "🎉",
             EmoteType::Clap => "👏",
+            EmoteType::ThumbsUp => "👍",
         }
     }
 
@@ -416,6 +419,7 @@ impl EmoteType {
             "shrug" => Some(EmoteType::Shrug),
             "cheer" => Some(EmoteType::Cheer),
             "clap" | "applaud" => Some(EmoteType::Clap),
+            "thumbsup" | "thumbs" | "like" => Some(EmoteType::ThumbsUp),
             _ => None,
         }
     }

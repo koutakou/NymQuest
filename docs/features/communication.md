@@ -38,6 +38,7 @@ The following emotes are available:
 - `/emote shrug` or `/em shrug` - Shrug your shoulders
 - `/emote cheer` or `/em cheer` - Cheer enthusiastically
 - `/emote clap` or `/em clap` - Applaud with appreciation
+- `/emote thumbsup` or `/em thumbs` - Give a thumbs up sign
 
 ## Privacy Considerations
 
