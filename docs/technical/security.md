@@ -69,6 +69,8 @@ The game includes configurable message pacing to enhance privacy by preventing t
 - **Controlled delays**: Introduces configurable intervals between message sends
 - **Timing obfuscation**: Prevents attackers from correlating actions based on timing patterns
 - **Configurable intervals**: Default 100ms, configurable between 1-10000ms
+- **Adaptive jitter**: Adds random timing variation (up to 25% by default) to further prevent timing analysis
+- **Enabled by default**: Client-side message pacing is now enabled by default for comprehensive protection
 
 ### Server-Side Message Processing Pacing
 - **Processing delays**: Introduces controlled intervals between processing messages

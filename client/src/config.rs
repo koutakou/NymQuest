@@ -34,6 +34,8 @@ pub struct ClientConfig {
     pub message_pacing_interval_ms: u64,
     /// Enable message pacing for enhanced privacy (adds jitter to prevent timing analysis)
     pub enable_message_pacing: bool,
+    /// Maximum jitter percentage to apply to message pacing (0-100)
+    pub message_pacing_jitter_percent: u8,
     /// Replay protection window size (number of sequence numbers to track for replay prevention)
     pub replay_protection_window_size: u8,
 }
@@ -54,7 +56,8 @@ impl Default for ClientConfig {
             server_address_file: "server_address.txt".to_string(),
             movement_speed: 14.0, // Same as server default
             message_pacing_interval_ms: 100,
-            enable_message_pacing: false,
+            enable_message_pacing: true, // Enabled by default for better privacy
+            message_pacing_jitter_percent: 25, // Add up to 25% random jitter to message pacing
             replay_protection_window_size: 64, // Default window size for tracking sequence numbers
         }
     }
@@ -110,6 +113,10 @@ impl ClientConfig {
             "NYMQUEST_CLIENT_ENABLE_MESSAGE_PACING",
             config.enable_message_pacing,
         )?;
+        config.message_pacing_jitter_percent = Self::load_env_u8(
+            "NYMQUEST_CLIENT_MESSAGE_PACING_JITTER_PERCENT",
+            config.message_pacing_jitter_percent,
+        )?;
         config.replay_protection_window_size = Self::load_env_u8(
             "NYMQUEST_CLIENT_REPLAY_PROTECTION_WINDOW_SIZE",
             config.replay_protection_window_size,
@@ -141,6 +148,10 @@ impl ClientConfig {
             config.message_pacing_interval_ms
         );
         info!("Enable message pacing: {}", config.enable_message_pacing);
+        info!(
+            "Message pacing jitter: {}%",
+            config.message_pacing_jitter_percent
+        );
         info!(
             "Replay protection window size: {}",
             config.replay_protection_window_size
@@ -251,6 +262,14 @@ impl ClientConfig {
             return Err(anyhow!(
                 "Invalid message pacing interval: {} (must be 1-10000ms)",
                 self.message_pacing_interval_ms
+            ));
+        }
+
+        // Validate jitter percentage
+        if self.message_pacing_jitter_percent > 100 {
+            return Err(anyhow!(
+                "Invalid message pacing jitter: {}% (must be 0-100%)",
+                self.message_pacing_jitter_percent
             ));
         }
 

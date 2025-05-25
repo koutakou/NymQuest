@@ -46,14 +46,7 @@ const CLIENT_BURST_SIZE: u32 = 15; // Slightly below server default of 20
 /// Maximum number of messages to send in a burst before enforcing rate limit
 const MAX_BURST_SIZE: u32 = CLIENT_BURST_SIZE;
 
-/// Default message pacing interval (milliseconds)
-const DEFAULT_PACING_INTERVAL_MS: u64 = 100;
-
-/// Maximum jitter to add to pacing interval (milliseconds)
-const MAX_JITTER_MS: u64 = 150;
-
-/// Default pacing status (enabled/disabled)
-const DEFAULT_PACING_ENABLED: bool = true;
+// All default pacing values are now driven by the client configuration
 
 /// NetworkManager handles all interactions with the Nym mixnet
 /// Structure to hold original message content for potential resends
@@ -111,6 +104,20 @@ pub struct NetworkManager {
     last_applied_jitter_ms: u64,
 }
 
+/// Calculate maximum jitter in milliseconds based on base interval and jitter percentage
+fn calculate_max_jitter(base_interval_ms: u64, jitter_percent: u8) -> u64 {
+    if jitter_percent == 0 {
+        return 0;
+    }
+
+    // Cap jitter percentage at 100% for safety
+    let capped_percent = jitter_percent.min(100) as u64;
+
+    // Calculate jitter as percentage of base interval
+    // Formula: (base_interval * jitter_percent) / 100
+    (base_interval_ms * capped_percent) / 100
+}
+
 impl NetworkManager {
     /// Create a new NetworkManager and connect to the Nym network
     pub async fn new(
@@ -157,8 +164,8 @@ impl NetworkManager {
             last_rate_limit_update: Instant::now(),
             negotiated_protocol_version: None,
             last_message_sent: None,
-            pacing_interval_ms: DEFAULT_PACING_INTERVAL_MS,
-            pacing_enabled: DEFAULT_PACING_ENABLED,
+            pacing_interval_ms: config.message_pacing_interval_ms,
+            pacing_enabled: config.enable_message_pacing,
             last_applied_jitter_ms: 0,
         })
     }
@@ -189,9 +196,13 @@ impl NetworkManager {
 
         // Apply message pacing for privacy enhancement if enabled
         if self.pacing_enabled && self.pacing_interval_ms > 0 {
-            // Add random jitter to pacing interval for enhanced privacy (timing obfuscation)
+            // Calculate jitter based on percentage from config for enhanced privacy (timing obfuscation)
             let mut rng = rand::thread_rng();
-            let jitter_ms = rng.gen_range(0..MAX_JITTER_MS);
+            let max_jitter = calculate_max_jitter(
+                self.pacing_interval_ms,
+                self.config.message_pacing_jitter_percent,
+            );
+            let jitter_ms = rng.gen_range(0..=max_jitter);
             self.last_applied_jitter_ms = jitter_ms;
 
             // Update status monitor with the applied jitter
@@ -231,7 +242,11 @@ impl NetworkManager {
         if self.pacing_enabled {
             if let Some(last_sent) = self.last_message_sent {
                 let mut rng = rand::thread_rng();
-                let jitter_ms = rng.gen_range(0..=MAX_JITTER_MS);
+                let max_jitter = calculate_max_jitter(
+                    self.pacing_interval_ms,
+                    self.config.message_pacing_jitter_percent,
+                );
+                let jitter_ms = rng.gen_range(0..=max_jitter);
                 self.last_applied_jitter_ms = jitter_ms;
 
                 // Calculate total delay including base interval and jitter
@@ -963,27 +978,31 @@ impl NetworkManager {
         Ok(())
     }
 
-    /// Set message pacing interval (0 to disable)
+    /// Modify message pacing settings
     pub fn set_message_pacing(&mut self, enabled: bool, interval_ms: u64) {
         self.pacing_enabled = enabled;
-        self.pacing_interval_ms = if enabled { interval_ms } else { 0 };
-
-        // Apply pacing immediately to enhance privacy through timing protection
-        if enabled && interval_ms > 0 {
-            // Record time of last message to start pacing from now
-            self.last_message_sent = Some(Instant::now());
+        if interval_ms > 0 {
+            self.pacing_interval_ms = interval_ms;
         }
 
-        // Update status monitor with new pacing settings
+        // Calculate jitter in ms based on percentage
+        let max_jitter = calculate_max_jitter(
+            self.pacing_interval_ms,
+            self.config.message_pacing_jitter_percent,
+        );
+
+        info!(
+            "Message pacing {}, interval: {}ms, max jitter: {}ms ({}%)",
+            if enabled { "enabled" } else { "disabled" },
+            self.pacing_interval_ms,
+            max_jitter,
+            self.config.message_pacing_jitter_percent
+        );
+
+        // Update status monitor
         if let Ok(mut monitor) = self.status_monitor.lock() {
             monitor.update_message_pacing(enabled, interval_ms, 0);
         }
-
-        debug!(
-            "Message pacing {}: interval={}ms (privacy enhancement)",
-            if enabled { "enabled" } else { "disabled" },
-            self.pacing_interval_ms
-        );
     }
 
     /// Get current message pacing configuration
