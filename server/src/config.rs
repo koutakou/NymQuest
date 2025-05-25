@@ -11,6 +11,7 @@ use tracing::{info, warn};
 /// - NYMQUEST_WORLD_MAX_Y: Maximum Y coordinate boundary (default: 100.0)
 /// - NYMQUEST_WORLD_MIN_Y: Minimum Y coordinate boundary (default: -100.0)
 /// - NYMQUEST_MOVEMENT_SPEED: Player movement speed multiplier (default: 14.0)
+/// - NYMQUEST_PLAYER_COLLISION_RADIUS: Minimum distance between players (default: 7.0)
 /// - NYMQUEST_MAX_PLAYER_NAME_LENGTH: Maximum player name length (default: 50)
 /// - NYMQUEST_MAX_CHAT_MESSAGE_LENGTH: Maximum chat message length (default: 500)
 /// - NYMQUEST_HEARTBEAT_INTERVAL_SECONDS: Heartbeat request interval (default: 30)
@@ -43,6 +44,8 @@ pub struct GameConfig {
     pub world_min_y: f32,
     /// Movement speed multiplier for player movements
     pub movement_speed: f32,
+    /// Minimum distance between players (collision radius)
+    pub player_collision_radius: f32,
     /// Maximum length allowed for player names
     pub max_player_name_length: usize,
     /// Maximum length allowed for chat messages
@@ -93,6 +96,7 @@ impl Default for GameConfig {
             world_max_y: 100.0,
             world_min_y: -100.0,
             movement_speed: 14.0,
+            player_collision_radius: 7.0,
             max_player_name_length: 50,
             max_chat_message_length: 500,
             heartbeat_interval_seconds: 30,
@@ -127,8 +131,14 @@ impl GameConfig {
         config.world_min_x = Self::load_env_f32("NYMQUEST_WORLD_MIN_X", config.world_min_x)?;
         config.world_max_y = Self::load_env_f32("NYMQUEST_WORLD_MAX_Y", config.world_max_y)?;
         config.world_min_y = Self::load_env_f32("NYMQUEST_WORLD_MIN_Y", config.world_min_y)?;
+
         config.movement_speed =
             Self::load_env_f32("NYMQUEST_MOVEMENT_SPEED", config.movement_speed)?;
+        config.player_collision_radius = Self::load_env_f32(
+            "NYMQUEST_PLAYER_COLLISION_RADIUS",
+            config.player_collision_radius,
+        )?;
+
         config.max_player_name_length = Self::load_env_usize(
             "NYMQUEST_MAX_PLAYER_NAME_LENGTH",
             config.max_player_name_length,

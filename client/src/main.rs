@@ -692,7 +692,7 @@ async fn handle_movement_direction(
                     if let Some(player) = state.players.get_mut(&player_id) {
                         let mut new_pos = player.position;
 
-                        // Use the configured movement speed
+                        // Use the configured movement speed from client config (should match server)
                         let movement_speed = config.movement_speed;
                         new_pos.apply_movement(move_vector, movement_speed);
 
@@ -700,6 +700,9 @@ async fn handle_movement_direction(
                         if let Some(boundaries) = boundaries {
                             boundaries.clamp_position_mut(&mut new_pos);
                         }
+
+                        // Note: Server will handle collision detection and may reject the move
+                        // Client can only predict movement assuming no collisions
 
                         clear_screen();
                         info!("Moving {:?}", direction);

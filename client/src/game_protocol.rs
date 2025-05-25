@@ -60,10 +60,12 @@ impl Position {
     /// Add a movement vector to this position
     #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn apply_movement(&mut self, move_vector: (f32, f32), speed: f32) {
+        // Apply movement with speed adjustment
         self.x += move_vector.0 * speed;
         self.y += move_vector.1 * speed;
 
-        // Clamp the position to world boundaries
+        // Note: Boundary checking should be done separately using WorldBoundaries
+        // This allows for configurable world boundaries rather than hardcoded values
     }
 
     /// Calculate distance to another position
@@ -332,7 +334,6 @@ pub struct WorldBoundaries {
 
 impl WorldBoundaries {
     /// Clamp a position to stay within world boundaries
-    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn clamp_position(&self, x: f32, y: f32) -> (f32, f32) {
         let clamped_x = x.clamp(self.min_x, self.max_x);
         let clamped_y = y.clamp(self.min_y, self.max_y);
@@ -340,17 +341,22 @@ impl WorldBoundaries {
     }
 
     /// Check if a position is within world boundaries
-    #[allow(dead_code)] // Part of complete protocol API for future use
+    #[allow(dead_code)]
     pub fn is_position_valid(&self, x: f32, y: f32) -> bool {
         x >= self.min_x && x <= self.max_x && y >= self.min_y && y <= self.max_y
     }
 
     /// Apply boundaries to a Position, modifying it in place
-    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn clamp_position_mut(&self, position: &mut Position) {
         let (x, y) = self.clamp_position(position.x, position.y);
         position.x = x;
         position.y = y;
+    }
+
+    /// Check if two positions would collide given a minimum distance
+    #[allow(dead_code)]
+    pub fn would_positions_collide(pos1: &Position, pos2: &Position, min_distance: f32) -> bool {
+        pos1.distance_to(pos2) < min_distance
     }
 }
 

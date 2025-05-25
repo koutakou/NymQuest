@@ -62,6 +62,7 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
   - **[User Guide](./docs/guides/user_guide.md)**: How to play the game and use commands
 - **Features**:
   - **[Combat System](./docs/features/combat.md)**: Details about the combat mechanics
+  - **[Movement System](./docs/features/movement.md)**: How player movement works
   - **[Privacy Features](./docs/features/privacy.md)**: Privacy benefits and implementations
   - **[Communication System](./docs/features/communication.md)**: Chat and emote systems
 - **Technical Documentation**:

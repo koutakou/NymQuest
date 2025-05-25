@@ -45,7 +45,7 @@ The protocol supports the following message types:
 - **Disconnect**: Client notifies server of disconnection
 
 ### Game Actions
-- **Move**: Client requests to move in a specified direction
+- **Move**: Client requests to move in a specified direction (see [Movement System](../features/movement.md))
 - **Attack**: Client requests to attack another player
 - **Chat**: Client sends a chat message
 - **Emote**: Client performs an emote action

@@ -598,47 +598,68 @@ async fn handle_move(
             // Calculate movement vector
             let (dx, dy) = direction.to_vector();
 
-            // Calculate speed needed to move exactly one cell in the mini-map
-            // The mini-map is 15x15 with world boundaries of -100 to 100, so each cell represents about 14 units
-            let mini_map_cell_size = 14.0;
+            // Get config for movement parameters and boundaries
+            let config = game_state.get_config();
+
+            // Use the configured movement speed from server settings
+            // This ensures consistency between server behavior and client configuration
+            let movement_speed = config.movement_speed;
 
             // Apply movement vector to get new position
             let mut new_position = Position {
-                x: player.position.x + dx * mini_map_cell_size,
-                y: player.position.y + dy * mini_map_cell_size,
+                x: player.position.x + dx * movement_speed,
+                y: player.position.y + dy * movement_speed,
             };
 
             // Ensure the position stays within world boundaries
-            let config = game_state.get_config();
             let (clamped_x, clamped_y) = config.clamp_position(new_position.x, new_position.y);
             new_position.x = clamped_x;
             new_position.y = clamped_y;
 
-            // Try to update position
-            if game_state.update_player_position(&player_id, new_position) {
-                // Movement was successful
-                // Provide immediate feedback to the player who moved
-                let move_confirm = ServerMessage::Event {
-                    message: format!(
-                        "Moved {:?} to position ({:.1}, {:.1})",
-                        direction, new_position.x, new_position.y
-                    ),
-                    seq_num: next_seq_num(),
-                };
+            // Check for collisions with other players before updating position
+            let collision_detected = {
+                // Get all other players to check for collisions
+                let other_players = game_state.get_all_players_except(&player_id);
 
-                // Create an authenticated message
-                let authenticated_confirm = AuthenticatedMessage::new(move_confirm, auth_key)?;
-                let confirm_msg = serde_json::to_string(&authenticated_confirm)?;
-                client.send_reply(sender_tag.clone(), confirm_msg).await?;
+                // Define minimum distance between players (based on the configured collision radius)
+                let min_distance = config.player_collision_radius * 2.0; // Twice the radius for two players
 
-                // Broadcast updated state to all players
-                broadcast_game_state(client, game_state, None, auth_key).await?
+                // Check if the new position would collide with any other player
+                other_players.iter().any(|other_player| {
+                    WorldBoundaries::would_positions_collide(
+                        &new_position,
+                        &other_player.position,
+                        min_distance,
+                    )
+                })
+            };
+
+            if !collision_detected {
+                // No collision detected, update the position
+                if game_state.update_player_position(&player_id, new_position) {
+                    // Movement was successful
+                    // Provide immediate feedback to the player who moved
+                    let move_confirm = ServerMessage::Event {
+                        message: format!(
+                            "Moved {:?} to position ({:.1}, {:.1})",
+                            direction, new_position.x, new_position.y
+                        ),
+                        seq_num: next_seq_num(),
+                    };
+
+                    // Create an authenticated message
+                    let authenticated_confirm = AuthenticatedMessage::new(move_confirm, auth_key)?;
+                    let confirm_msg = serde_json::to_string(&authenticated_confirm)?;
+                    client.send_reply(sender_tag.clone(), confirm_msg).await?;
+
+                    // Broadcast updated state to all players
+                    broadcast_game_state(client, game_state, None, auth_key).await?
+                }
             } else {
-                // Movement failed (collision with another player or obstacle)
+                // Collision detected with another player
                 let error_msg = ServerMessage::Error {
-                    message:
-                        "Cannot move to that position - there's an obstacle or another player there"
-                            .to_string(),
+                    message: "Cannot move to that position - another player is already there"
+                        .to_string(),
                     seq_num: next_seq_num(),
                 };
 

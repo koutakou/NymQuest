@@ -297,6 +297,22 @@ impl GameState {
         }
     }
 
+    /// Get all players except the one with the specified ID
+    /// Used for collision detection and other player-to-player interactions
+    pub fn get_all_players_except(&self, player_id: &str) -> Vec<Player> {
+        match self.players.read() {
+            Ok(players) => players
+                .iter()
+                .filter(|(id, _)| *id != player_id)
+                .map(|(_, player)| player.clone())
+                .collect(),
+            Err(e) => {
+                error!("Failed to get players except {}: {}", player_id, e);
+                Vec::new()
+            }
+        }
+    }
+
     /// Find a player's internal ID from their display ID
     pub fn get_player_id_by_display_id(&self, display_id: &str) -> Option<String> {
         match self.players.read() {

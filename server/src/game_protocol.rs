@@ -350,16 +350,24 @@ impl WorldBoundaries {
         (clamped_x, clamped_y)
     }
 
+    /// Check if a position is within world boundaries
     #[allow(dead_code)]
     pub fn is_position_valid(&self, x: f32, y: f32) -> bool {
         x >= self.min_x && x <= self.max_x && y >= self.min_y && y <= self.max_y
     }
 
+    /// Apply boundaries to a Position, modifying it in place
     #[allow(dead_code)]
     pub fn clamp_position_mut(&self, position: &mut Position) {
         let (x, y) = self.clamp_position(position.x, position.y);
         position.x = x;
         position.y = y;
+    }
+
+    /// Check if two positions would collide given a minimum distance
+    #[allow(dead_code)]
+    pub fn would_positions_collide(pos1: &Position, pos2: &Position, min_distance: f32) -> bool {
+        pos1.distance_to(pos2) < min_distance
     }
 
     /// Create WorldBoundaries from GameConfig
