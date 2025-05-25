@@ -131,16 +131,18 @@ pub struct StatusMonitor {
     pub tracked_messages: VecDeque<TrackedMessage>,
     /// Current privacy protection level
     pub privacy_level: PrivacyLevel,
-    /// Current connection health assessment
+    /// Connection health based on network metrics
     pub connection_health: ConnectionHealth,
-    /// Timestamp of last status update
-    pub last_update: Instant,
-    /// Whether mixnet connection is active
-    pub mixnet_connected: bool,
-    /// Estimated anonymity set size (number of other users in mixnet)
-    pub anonymity_set_size: u32,
-    /// Message pacing information
+    /// Is the client connected to the mixnet
+    pub connected: bool,
+    /// Pacing information for privacy protection
     pub pacing_info: PacingInfo,
+    /// Anonymity set size (number of participants in the mixnet)
+    pub anonymity_set_size: u32,
+    /// Last game state update message (to display in UI)
+    pub last_game_update: Option<String>,
+    /// Last connection status update (to display in UI)
+    pub last_connection_update: Option<String>,
 }
 
 impl StatusMonitor {
@@ -151,11 +153,32 @@ impl StatusMonitor {
             tracked_messages: VecDeque::with_capacity(100),
             privacy_level: PrivacyLevel::Compromised, // Start pessimistic
             connection_health: ConnectionHealth::Poor,
-            last_update: Instant::now(),
-            mixnet_connected: false,
+            connected: false,
             anonymity_set_size: 0,
             pacing_info: PacingInfo::new(),
+            last_game_update: None,
+            last_connection_update: None,
         }
+    }
+
+    /// Update game state information to display in the UI
+    pub fn update_game_state_info(&mut self, message: String) {
+        self.last_game_update = Some(message);
+    }
+
+    /// Update connection status information to display in the UI
+    pub fn update_connection_info(&mut self, message: String) {
+        self.last_connection_update = Some(message);
+    }
+
+    /// Get game state update message if available
+    pub fn get_game_state_info(&self) -> Option<&String> {
+        self.last_game_update.as_ref()
+    }
+
+    /// Get connection status update message if available
+    pub fn get_connection_info(&self) -> Option<&String> {
+        self.last_connection_update.as_ref()
     }
 
     /// Record that a message was sent
@@ -250,7 +273,7 @@ impl StatusMonitor {
         estimated_hops: Option<u32>,
         anonymity_set_size: Option<u32>,
     ) {
-        self.mixnet_connected = connected;
+        self.connected = connected;
 
         if let Some(hops) = estimated_hops {
             self.network_stats.estimated_hops = hops;
@@ -283,7 +306,8 @@ impl StatusMonitor {
 
     /// Update overall connection health and privacy level assessment
     fn update_status(&mut self) {
-        self.last_update = Instant::now();
+        // Update timestamp handled by pacing_info
+        self.pacing_info.last_update = Instant::now();
 
         // Assess connection health based on multiple factors
         self.connection_health = self.assess_connection_health();
@@ -314,7 +338,7 @@ impl StatusMonitor {
 
     /// Assess current privacy level based on mixnet status, connection health, and pacing
     fn assess_privacy_level(&self) -> PrivacyLevel {
-        if !self.mixnet_connected {
+        if !self.connected {
             return PrivacyLevel::Compromised;
         }
 
@@ -443,6 +467,7 @@ impl StatusMonitor {
     }
 
     /// Get pending message count (sent but not yet delivered)
+    #[allow(dead_code)] // Part of complete monitoring API for future use
     pub fn pending_message_count(&self) -> usize {
         self.tracked_messages
             .iter()

@@ -32,31 +32,24 @@ fn init_logging() -> anyhow::Result<()> {
     let file_appender = tracing_appender::rolling::daily("logs", "nymquest-client.log");
     let (file_writer, _guard) = tracing_appender::non_blocking(file_appender);
 
-    // Set up console output with filtering for better UX
-    // Use a restrictive filter to only show our application logs, not noisy network libraries
-    let console_filter = EnvFilter::new("nym_mmorpg_client=info");
-
-    let console_layer = tracing_subscriber::fmt::layer()
-        .with_target(false)
-        .with_level(true)
-        .compact()
-        .with_filter(console_filter);
-
     // Set up file output with JSON formatting for production parsing
+    // This will capture all logs to file only, not to console
     let file_layer = tracing_subscriber::fmt::layer()
         .with_writer(file_writer)
         .json()
         .with_target(true)
+        .with_level(true)
         .with_current_span(false);
 
     // Initialize the subscriber with environment-based filtering for file logs
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
+    // Only use the file layer, remove console layer to prevent logs from appearing in the command input area
     tracing_subscriber::registry()
-        .with(console_layer)
         .with(file_layer.with_filter(filter))
         .init();
 
+    // This log entry will only appear in the log file, not in the console
     info!("Client structured logging initialized");
     Ok(())
 }
@@ -252,18 +245,40 @@ async fn process_user_command(
         // Registration command
         "register" | "r" => {
             // Check if the player is already registered
-            if let Ok(state) = game_state.lock() {
+            if let Ok(mut state) = game_state.lock() {
                 if state.is_registered() {
-                    info!("You are already registered. Please disconnect first before registering again.");
+                    // Show in UI instead of just logging
+                    state.add_system_message("System".to_string(), 
+                        "You are already registered. Please disconnect first before registering again.".to_string());
+                    render_game_state(&state);
                     return Ok(());
                 }
+                
+                // Update status monitor with registration status
+                if let Ok(mut monitor) = state.status_monitor.lock() {
+                    monitor.update_game_state_info("Registration in progress...".to_string());
+                }
+                
+                // Show the status in the UI
+                render_game_state(&state);
             } else {
-                error!("Failed to access game state for registration check. Please restart the client.");
+                // Direct console output for critical errors
+                println!("{}", "Failed to access game state for registration check. Please restart the client.".red());
                 return Ok(());
             }
 
             if command_parts.len() < 2 {
-                info!("Please provide a name to register with");
+                if let Ok(mut state) = game_state.lock() {
+                    state.add_system_message("System".to_string(), 
+                        "Please provide a name to register with".to_string());
+                    
+                    // Reset the registration status
+                    if let Ok(mut monitor) = state.status_monitor.lock() {
+                        monitor.update_game_state_info("Registration failed - name required".to_string());
+                    }
+                    
+                    render_game_state(&state);
+                }
                 return Ok(());
             }
 
@@ -271,15 +286,23 @@ async fn process_user_command(
 
             // Create register message (sequence number handled by NetworkManager)
             let register_msg = ClientMessage::Register {
-                name,
+                name: name.clone(),
                 protocol_version: ProtocolVersion::default(),
                 seq_num: 0, // Placeholder, will be replaced by NetworkManager
             };
 
+            // Show registration attempt message in UI
+            if let Ok(mut state) = game_state.lock() {
+                state.add_system_message("System".to_string(), 
+                    format!("Attempting to register as '{}'. Please wait...", name));
+                render_game_state(&state);
+            }
+            
             // Send the message
             network.send_message(register_msg).await?;
-
-            info!("Registration request sent...");
+            
+            // Direct console output to show status
+            println!("{}", "Registration request sent...".cyan());
         }
         // Movement commands
         "move" | "m" | "go" => {
@@ -844,26 +867,36 @@ fn process_server_message(
             shutdown_in_seconds,
             seq_num: _,
         } => {
-            // Display a prominent shutdown warning
             let warning = format!(
                 "⚠️ SERVER SHUTDOWN IN {} SECONDS: {}",
                 shutdown_in_seconds, message
             );
 
-            // Add to chat history as a system message
             if let Ok(mut state) = game_state.lock() {
+                // Add to system messages
                 state.add_system_message("SERVER SHUTDOWN".to_string(), warning.clone());
+                
+                // Update status monitor for display in UI
+                if let Ok(mut monitor) = state.status_monitor.lock() {
+                    monitor.update_game_state_info(format!("SERVER SHUTDOWN IN {} SECONDS", shutdown_in_seconds));
+                    monitor.update_connection_info(message.clone());
+                }
             }
 
-            // Print a very visible warning in the console
-            error!(
-                "{}\n{}",
-                "⚠️ SERVER SHUTDOWN NOTICE ⚠️".red().bold(),
-                warning.red().bold()
-            );
+            // Print directly to console (bypassing logging) to ensure visibility
+            // This will show even with logging disabled
+            println!("{}", "⚠️ SERVER SHUTDOWN NOTICE ⚠️".red().bold());
+            println!("{}", warning.red().bold());
 
+            // Force a UI refresh to show the shutdown message
+            if let Ok(state) = game_state.lock() {
+                render_game_state(&state);
+            }
+
+            // Sleep briefly to ensure the message is visible before exit
+            std::thread::sleep(std::time::Duration::from_millis(1000));
+            
             // Immediate exit without sending a disconnect message
-            info!("Server initiated shutdown. Exiting immediately without sending disconnect message...");
             std::process::exit(0);
         }
         ServerMessage::RegisterAck {
@@ -875,6 +908,10 @@ fn process_server_message(
             if let Ok(mut state) = game_state.lock() {
                 state.set_player_id(player_id.clone());
                 state.set_world_boundaries(world_boundaries);
+                state.add_system_message(
+                    "System".to_string(),
+                    "Registration successful! Welcome to NymQuest!".to_string(),
+                );
                 info!(
                     "Registration successful! Your player ID is: {}",
                     player_id.green()
@@ -882,18 +919,26 @@ fn process_server_message(
             } else {
                 error!("Failed to update game state with registration info");
             }
-            false
+            true // Force UI refresh after successful registration
         }
         ServerMessage::GameState {
             players,
             seq_num: _,
         } => {
             if let Ok(mut state) = game_state.lock() {
-                state.update_players(players);
+                state.update_players(players.clone());
+
+                // Update the status monitor with game state info for UI display
+                if let Ok(mut monitor) = state.status_monitor.lock() {
+                    monitor.update_game_state_info(format!(
+                        "Game state updated - {} players online",
+                        players.len()
+                    ));
+                }
             } else {
                 error!("Failed to update game state with players info");
             }
-            false
+            true // Force UI refresh when game state updates
         }
         ServerMessage::ChatMessage {
             sender_name,

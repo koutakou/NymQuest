@@ -4,6 +4,7 @@ use std::io::{self, Write};
 
 use crate::game_protocol::{Player, Position};
 use crate::game_state::{ChatMessage, GameState};
+use crate::status_monitor::{ConnectionHealth, PrivacyLevel};
 
 /// Modern Unicode box drawing characters for a sleek interface
 const DOUBLE_HORIZONTAL: &str = "═";
@@ -511,14 +512,16 @@ pub fn render_nearby_players(state: &GameState) {
 
 /// Render privacy and connection status with modern indicators
 pub fn render_status_dashboard(state: &GameState) {
-    let monitor = match state.status_monitor.lock() {
+    // Get a lock on the status monitor
+    let status_monitor = match state.status_monitor.lock() {
         Ok(monitor) => monitor,
         Err(_) => {
-            let error_content = vec![format!("{}  Status monitoring unavailable", ICON_WARNING)
+            // Handle poisoned mutex gracefully
+            let error_content = vec![format!("{} Status monitoring unavailable", ICON_WARNING)
                 .bright_red()
                 .to_string()];
             draw_panel(
-                &format!("{}  CONNECTION STATUS", ICON_NETWORK),
+                &format!("{} CONNECTION STATUS", ICON_NETWORK),
                 &error_content,
                 PANEL_WIDTH,
                 PanelStyle::Primary,
@@ -527,106 +530,137 @@ pub fn render_status_dashboard(state: &GameState) {
         }
     };
 
-    let (health_desc, privacy_desc) = monitor.status_description();
+    // Health and privacy descriptions
+    let (health_desc, privacy_desc) = status_monitor.status_description();
 
-    let mut content = Vec::new();
-
-    // Privacy status
-    content.push(format!(
-        "{}  Privacy: {}",
-        ICON_PRIVACY,
-        privacy_desc.bright_cyan().bold()
-    ));
-
-    // Connection health
-    content.push(format!("{}  Health: {}", ICON_NETWORK, health_desc));
-
-    // Mixnet status
-    let mixnet_status = if monitor.mixnet_connected {
-        format!(
-            "{}  Nym Mixnet ({} hops)",
-            ICON_SUCCESS, monitor.network_stats.estimated_hops
-        )
-    } else {
-        format!("{}  Direct Connection (No Privacy)", ICON_WARNING)
+    // Get the color for the privacy description
+    let privacy_color = match status_monitor.privacy_level {
+        PrivacyLevel::FullyProtected => "green".to_string(),
+        PrivacyLevel::Protected => "cyan".to_string(),
+        PrivacyLevel::Degraded => "yellow".to_string(),
+        PrivacyLevel::Compromised => "red".to_string(),
     };
-    content.push(mixnet_status);
 
-    // Message pacing status
-    let pacing_status = if monitor.pacing_info.enabled {
-        let jitter_info = if monitor.pacing_info.jitter_ms > 0 {
-            format!(" + {}ms jitter", monitor.pacing_info.jitter_ms)
-        } else {
-            "".to_string()
-        };
-        format!(
-            "{}  Message Pacing: {}ms{}",
-            monitor.pacing_indicator(),
-            monitor.pacing_info.interval_ms,
-            jitter_info
-        )
-    } else {
-        format!("{}  Message Pacing: Disabled", monitor.pacing_indicator())
+    // Create colored version
+    let privacy_colored = match status_monitor.privacy_level {
+        PrivacyLevel::FullyProtected => privacy_desc.green().bold(),
+        PrivacyLevel::Protected => privacy_desc.cyan().bold(),
+        PrivacyLevel::Degraded => privacy_desc.yellow().bold(),
+        PrivacyLevel::Compromised => privacy_desc.red().bold(),
     };
-    content.push(pacing_status);
 
-    // Anonymity set
-    content.push(format!(
-        "{}  {} users in set",
-        ICON_USERS, monitor.anonymity_set_size
-    ));
+    // Format connection health description
+    let health_colored = match status_monitor.connection_health {
+        ConnectionHealth::Excellent => health_desc.green().bold(),
+        ConnectionHealth::Good => health_desc.cyan().bold(),
+        ConnectionHealth::Fair => health_desc.yellow().bold(),
+        ConnectionHealth::Poor => health_desc.red(),
+        ConnectionHealth::Critical => health_desc.red().bold(),
+    };
 
-    // Network stats
-    if monitor.network_stats.messages_sent > 0 {
-        content.push("".to_string());
-        content.push(
-            format!("{}  Network Statistics:", ICON_INFO)
-                .bright_blue()
-                .bold()
-                .to_string(),
-        );
+    // Status panel with enhanced details
+    let mut content = vec![
+        format!("{} Privacy Level: {}", ICON_PRIVACY, privacy_colored),
+        format!(
+            "   {} Anonymity set: {} participants",
+            ICON_USERS,
+            status_monitor.anonymity_set_size.to_string().cyan()
+        ),
+        "".to_string(),
+        format!("{} Connection: {}", ICON_NETWORK, health_colored),
+    ];
+
+    // Add pacing status if enabled
+    if status_monitor.pacing_info.enabled {
         content.push(format!(
-            "  {}  Latency: {}ms",
-            ICON_BULLET, monitor.network_stats.avg_latency_ms
+            "   {} Message pacing: {} ms",
+            ICON_TIME,
+            status_monitor.pacing_info.interval_ms.to_string().cyan()
         ));
-        content.push(format!(
-            "  {}  Success: {:.1}%",
-            ICON_BULLET,
-            monitor.network_stats.delivery_success_rate()
-        ));
-        content.push(format!(
-            "  {}  Loss: {:.1}%",
-            ICON_BULLET,
-            monitor.network_stats.packet_loss_percentage()
-        ));
-
-        // Display pending messages count if there are any
-        let pending_count = monitor.pending_message_count();
-        if pending_count > 0 {
-            content.push(format!(
-                "  {}  Pending: {} messages",
-                ICON_BULLET, pending_count
-            ));
-        }
-
-        if let Some(last_comm) = monitor.network_stats.last_successful_communication {
-            let elapsed = last_comm.elapsed().as_secs();
-            let activity_text = if elapsed < 60 {
-                format!("{}s ago", elapsed)
-            } else if elapsed < 3600 {
-                format!("{}m ago", elapsed / 60)
-            } else {
-                format!("{}h ago", elapsed / 3600)
-            };
-            content.push(format!("{}  Last: {}", ICON_TIME, activity_text));
-        }
     }
 
+    // Display network statistics
+    content.push("".to_string());
+    content.push(format!(
+        "{} Average latency: {} ms",
+        ICON_INFO,
+        status_monitor
+            .network_stats
+            .avg_latency_ms
+            .to_string()
+            .cyan()
+    ));
+
+    content.push(format!(
+        "   {} Messages sent: {}",
+        ICON_ARROW_RIGHT,
+        status_monitor
+            .network_stats
+            .messages_sent
+            .to_string()
+            .cyan()
+    ));
+
+    content.push(format!(
+        "   {} Messages received: {}",
+        ICON_ARROW_RIGHT,
+        status_monitor
+            .network_stats
+            .messages_delivered
+            .to_string()
+            .cyan()
+    ));
+
+    // Add success rate if we have sent any messages
+    if status_monitor.network_stats.messages_sent > 0 {
+        let success_rate = status_monitor.network_stats.delivery_success_rate();
+        let success_rate_str = format!("{:.1}%", success_rate);
+        let colored_rate = if success_rate > 90.0 {
+            success_rate_str.green()
+        } else if success_rate > 75.0 {
+            success_rate_str.yellow()
+        } else {
+            success_rate_str.red()
+        };
+
+        content.push(format!(
+            "   {} Delivery success rate: {}",
+            ICON_SUCCESS, colored_rate
+        ));
+    }
+
+    // Display latest game state update if available
+    if let Some(game_update) = status_monitor.get_game_state_info() {
+        content.push("".to_string());
+        content.push(format!(
+            "{} Game Status: {}",
+            ICON_INFO,
+            game_update.cyan().bold()
+        ));
+    }
+
+    // Display latest connection update if available
+    if let Some(conn_update) = status_monitor.get_connection_info() {
+        content.push(format!("   {} {}", ICON_NETWORK, conn_update.yellow()));
+    }
+
+    // Format status panel
+    let panel_style = match status_monitor.privacy_level {
+        PrivacyLevel::FullyProtected => PanelStyle::Primary,
+        PrivacyLevel::Protected => PanelStyle::Secondary,
+        PrivacyLevel::Degraded => PanelStyle::Accent,
+        PrivacyLevel::Compromised => PanelStyle::Info,
+    };
+
     draw_panel(
-        &format!("{}  CONNECTION STATUS", ICON_NETWORK),
+        &format!(
+            "{} PRIVACY STATUS ({})",
+            ICON_PRIVACY,
+            privacy_color.to_uppercase()
+        ),
         &content,
         PANEL_WIDTH,
-        PanelStyle::Primary,
+        panel_style,
     );
 }
 
