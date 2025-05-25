@@ -18,6 +18,14 @@ NymQuest is a privacy-preserving multiplayer game that leverages the Nym mixnet 
    # Register in the client
    /register YourName
    ```
+### Server Discovery
+
+The client automatically discovers the server using a cross-platform mechanism:
+
+- **Automatic Discovery**: Server saves connection info to platform-specific data directories
+- **Custom Location**: Set `NYMQUEST_SERVER_ADDRESS_FILE=/path/to/file` environment variable
+- **Cross-Platform**: Works on Linux (XDG), Windows (AppData), and macOS
+- **Production Ready**: No hardcoded paths, works regardless of binary locations
 
 ## Releases
 

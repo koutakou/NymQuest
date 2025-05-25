@@ -1,5 +1,6 @@
 mod command_completer;
 mod config;
+mod discovery;
 mod game_protocol;
 mod game_state;
 mod message_auth;

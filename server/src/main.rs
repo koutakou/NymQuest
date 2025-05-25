@@ -1,4 +1,5 @@
 mod config;
+mod discovery;
 mod game_protocol;
 mod game_state;
 mod handlers;
@@ -141,15 +142,12 @@ async fn main() -> Result<()> {
     info!("Generated authentication key for secure message verification");
 
     // Write server address and authentication key to a file that the client can read
-    match save_server_address(&server_address, &auth_key, "../client/server_address.txt") {
-        Ok(()) => info!("Server address and auth key saved to client file"),
-        Err(e) => {
-            error!(
-                error = %e,
-                "Failed to save server address to client file"
-            );
-            return Err(e);
-        }
+    if let Err(e) = save_server_address(&server_address, &auth_key) {
+        error!(
+            error = %e,
+            "Failed to save server address to discovery file"
+        );
+        return Err(e);
     }
 
     info!("Server is ready and listening for connections");

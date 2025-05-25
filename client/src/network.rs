@@ -1,11 +1,10 @@
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use futures::StreamExt;
 use nym_sdk::mixnet::{
     IncludedSurbs, MixnetClient, MixnetClientBuilder, MixnetMessageSender, Recipient, StoragePaths,
 };
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -113,34 +112,15 @@ impl NetworkManager {
         config: &ClientConfig,
         status_monitor: Arc<Mutex<StatusMonitor>>,
     ) -> Result<Self> {
-        // Read server address and auth key from file
-        let file_content = match fs::read_to_string(&config.server_address_file)
-            .or_else(|_| fs::read_to_string("server_address.txt"))
-            .or_else(|_| fs::read_to_string("../client/server_address.txt"))
-        {
-            Ok(content) => content.trim().to_string(),
-            Err(_) => {
-                return Err(anyhow!("Cannot read server_address.txt. Make sure the server is running and you have access to the address file."));
-            }
-        };
+        // Use discovery mechanism to find server connection information
+        let (server_address, auth_key_b64) = crate::discovery::load_server_connection_info()
+            .with_context(|| "Failed to discover server connection information")?;
 
-        // Parse the file content to extract server address and auth key
-        let parts: Vec<&str> = file_content.split(';').collect();
-        if parts.len() != 2 {
-            return Err(anyhow!(
-                "Invalid format in server_address.txt. Expected 'address;auth_key' format."
-            ));
-        }
+        // Parse the authentication key
+        let auth_key = AuthKey::from_base64(&auth_key_b64)
+            .with_context(|| "Failed to parse authentication key from discovery file")?;
 
-        let server_address = parts[0].trim().to_string();
-        let auth_key = match AuthKey::from_base64(parts[1].trim()) {
-            Ok(key) => key,
-            Err(e) => {
-                return Err(anyhow!("Failed to parse authentication key: {}", e));
-            }
-        };
-
-        info!("Server address: {}", server_address);
+        info!("Successfully discovered server at: {}", server_address);
 
         // Configure Nym client with a unique directory for each instance
         // Generate a unique ID for this client to prevent connection conflicts

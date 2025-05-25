@@ -34,18 +34,59 @@ This guide provides instructions for installing and running NymQuest.
    cd server
    cargo run --release
    ```
-   The server will display its Nym address and save it to `client/server_address.txt`.
+   The server will display its Nym address and save connection info to the platform-specific data directory.
 
 2. Start the client in a new terminal:
    ```
    cd client
    cargo run --release
    ```
+   The client will automatically discover the server using the cross-platform discovery mechanism.
 
 3. In the client, register with a username:
    ```
    /register YourName
    ```
+
+## Server Discovery
+
+The client uses a robust discovery mechanism to find the server:
+
+### Automatic Discovery (Recommended)
+
+The server automatically saves connection information to platform-specific directories:
+
+- **Linux**: `~/.local/share/nymquest/server/nymquest_server.addr`
+- **Windows**: `%APPDATA%\nymquest\server\nymquest_server.addr`
+- **macOS**: `~/Library/Application Support/nymquest/server/nymquest_server.addr`
+
+### Custom Server Location
+
+For advanced deployments, you can specify a custom server address file location:
+
+```bash
+# Set custom location for server address file
+export NYMQUEST_SERVER_ADDRESS_FILE=/path/to/custom/server_address.txt
+
+# Start the server (will save to custom location)
+cd server
+cargo run --release
+
+# Start the client (will find server at custom location)
+cd client
+cargo run --release
+```
+
+### Discovery Priority
+
+The client searches for server connection information in the following order:
+
+1. Custom location specified by `NYMQUEST_SERVER_ADDRESS_FILE` environment variable
+2. Platform-specific data directory (recommended)
+3. Current working directory (`nymquest_server.addr`)
+4. Current working directory (`server_address.txt` - legacy compatibility)
+5. Legacy relative paths (for backward compatibility)
+6. Home directory fallback
 
 ## Configuration Options
 
