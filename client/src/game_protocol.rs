@@ -323,7 +323,7 @@ pub enum Direction {
 }
 
 impl Direction {
-    /// Converts a direction to a movement vector
+    /// Convert direction to a movement vector
     #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn to_vector(self) -> (f32, f32) {
         // 1/sqrt(2) ≈ 0.7071 is the correct normalization factor for diagonal movement

@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 // Import message authentication module
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
+use crate::message_replay::is_message_replay;
 
 use crate::game_protocol::{
     ClientMessage, ClientMessageType, Direction, EmoteType, ProtocolVersion, ServerMessage,
@@ -185,6 +186,39 @@ impl NetworkManager {
 
         // Get the next sequence number before borrowing client
         let seq_num = self.next_seq_num();
+
+        // Apply message pacing for privacy enhancement if enabled
+        if self.pacing_enabled && self.pacing_interval_ms > 0 {
+            // Add random jitter to pacing interval for enhanced privacy (timing obfuscation)
+            let mut rng = rand::thread_rng();
+            let jitter_ms = rng.gen_range(0..MAX_JITTER_MS);
+            self.last_applied_jitter_ms = jitter_ms;
+
+            // Update status monitor with the applied jitter
+            if let Ok(mut monitor) = self.status_monitor.lock() {
+                monitor.update_message_pacing(true, self.pacing_interval_ms, jitter_ms);
+            }
+
+            // Calculate the time to wait based on pacing interval and last message sent
+            if let Some(last_sent) = self.last_message_sent {
+                let elapsed = last_sent.elapsed().as_millis() as u64;
+                let total_interval = self.pacing_interval_ms + jitter_ms;
+
+                if elapsed < total_interval {
+                    let wait_ms = total_interval - elapsed;
+                    trace!(
+                        "Pacing message, waiting {}ms ({}ms base + {}ms jitter)",
+                        wait_ms,
+                        self.pacing_interval_ms,
+                        jitter_ms
+                    );
+                    time::sleep(Duration::from_millis(wait_ms)).await;
+                }
+            }
+
+            // Update the last message sent timestamp
+            self.last_message_sent = Some(Instant::now());
+        }
 
         // Apply rate limiting if needed
         if !self.check_rate_limit() {
@@ -699,7 +733,16 @@ impl NetworkManager {
             }
         }
 
-        // Check if we've already processed this message
+        // Check for message replay attacks using the replay protection window
+        if seq_num > 0 && is_message_replay(&self.server_address, seq_num) {
+            warn!(
+                "Possible replay attack detected: message with seq_num {}",
+                seq_num
+            );
+            return None;
+        }
+
+        // Additional basic duplicate detection (now supplementary to replay protection)
         if self.received_server_msgs.contains(&seq_num) {
             debug!("Ignoring duplicate message with seq_num {}", seq_num);
             return None;
@@ -925,13 +968,19 @@ impl NetworkManager {
         self.pacing_enabled = enabled;
         self.pacing_interval_ms = if enabled { interval_ms } else { 0 };
 
+        // Apply pacing immediately to enhance privacy through timing protection
+        if enabled && interval_ms > 0 {
+            // Record time of last message to start pacing from now
+            self.last_message_sent = Some(Instant::now());
+        }
+
         // Update status monitor with new pacing settings
         if let Ok(mut monitor) = self.status_monitor.lock() {
             monitor.update_message_pacing(enabled, interval_ms, 0);
         }
 
         debug!(
-            "Message pacing {}: interval={}ms",
+            "Message pacing {}: interval={}ms (privacy enhancement)",
             if enabled { "enabled" } else { "disabled" },
             self.pacing_interval_ms
         );

@@ -4,6 +4,7 @@ mod discovery;
 mod game_protocol;
 mod game_state;
 mod message_auth;
+mod message_replay;
 mod network;
 mod renderer;
 mod status_monitor;
@@ -253,12 +254,12 @@ async fn process_user_command(
                     render_game_state(&state);
                     return Ok(());
                 }
-                
+
                 // Update status monitor with registration status
                 if let Ok(mut monitor) = state.status_monitor.lock() {
                     monitor.update_game_state_info("Registration in progress...".to_string());
                 }
-                
+
                 // Show the status in the UI
                 render_game_state(&state);
             } else {
@@ -269,14 +270,18 @@ async fn process_user_command(
 
             if command_parts.len() < 2 {
                 if let Ok(mut state) = game_state.lock() {
-                    state.add_system_message("System".to_string(), 
-                        "Please provide a name to register with".to_string());
-                    
+                    state.add_system_message(
+                        "System".to_string(),
+                        "Please provide a name to register with".to_string(),
+                    );
+
                     // Reset the registration status
                     if let Ok(mut monitor) = state.status_monitor.lock() {
-                        monitor.update_game_state_info("Registration failed - name required".to_string());
+                        monitor.update_game_state_info(
+                            "Registration failed - name required".to_string(),
+                        );
                     }
-                    
+
                     render_game_state(&state);
                 }
                 return Ok(());
@@ -293,14 +298,16 @@ async fn process_user_command(
 
             // Show registration attempt message in UI
             if let Ok(mut state) = game_state.lock() {
-                state.add_system_message("System".to_string(), 
-                    format!("Attempting to register as '{}'. Please wait...", name));
+                state.add_system_message(
+                    "System".to_string(),
+                    format!("Attempting to register as '{}'. Please wait...", name),
+                );
                 render_game_state(&state);
             }
-            
+
             // Send the message
             network.send_message(register_msg).await?;
-            
+
             // Direct console output to show status
             println!("{}", "Registration request sent...".cyan());
         }
@@ -875,10 +882,13 @@ fn process_server_message(
             if let Ok(mut state) = game_state.lock() {
                 // Add to system messages
                 state.add_system_message("SERVER SHUTDOWN".to_string(), warning.clone());
-                
+
                 // Update status monitor for display in UI
                 if let Ok(mut monitor) = state.status_monitor.lock() {
-                    monitor.update_game_state_info(format!("SERVER SHUTDOWN IN {} SECONDS", shutdown_in_seconds));
+                    monitor.update_game_state_info(format!(
+                        "SERVER SHUTDOWN IN {} SECONDS",
+                        shutdown_in_seconds
+                    ));
                     monitor.update_connection_info(message.clone());
                 }
             }
@@ -895,7 +905,7 @@ fn process_server_message(
 
             // Sleep briefly to ensure the message is visible before exit
             std::thread::sleep(std::time::Duration::from_millis(1000));
-            
+
             // Immediate exit without sending a disconnect message
             std::process::exit(0);
         }

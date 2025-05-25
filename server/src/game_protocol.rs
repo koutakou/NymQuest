@@ -26,12 +26,14 @@ impl Default for ProtocolVersion {
 
 impl ProtocolVersion {
     /// Check if this version is compatible with another version
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn is_compatible_with(&self, other: &ProtocolVersion) -> bool {
         // We can communicate if our ranges overlap
         self.min_supported <= other.current && other.min_supported <= self.current
     }
 
     /// Get the negotiated version to use (highest common version)
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn negotiate_with(&self, other: &ProtocolVersion) -> Option<u16> {
         if !self.is_compatible_with(other) {
             return None;
@@ -49,7 +51,8 @@ pub struct Position {
 }
 
 impl Position {
-    // Create a new position from coordinates
+    /// Create a new position from coordinates
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y }
     }
@@ -64,7 +67,8 @@ impl Position {
         // This allows for configurable world boundaries rather than hardcoded values
     }
 
-    // Calculate distance to another position
+    /// Calculate distance to another position
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn distance_to(&self, other: &Position) -> f32 {
         let dx = self.x - other.x;
         let dy = self.y - other.y;
@@ -235,6 +239,8 @@ pub enum ServerMessage {
 // Helper implementation for ServerMessage to get metadata easily
 impl ServerMessage {
     #[allow(dead_code)]
+    /// Get the message type
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn get_type(&self) -> ServerMessageType {
         match self {
             ServerMessage::ServerShutdown { .. } => ServerMessageType::ServerShutdown,
@@ -271,7 +277,8 @@ impl ServerMessage {
 
 // Helper implementation for ClientMessage to get metadata easily
 impl ClientMessage {
-    // Get the message type
+    /// Get the message type
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn get_type(&self) -> ClientMessageType {
         match self {
             ClientMessage::Register { .. } => ClientMessageType::Register,
@@ -286,7 +293,8 @@ impl ClientMessage {
         }
     }
 
-    // Get the sequence number
+    /// Get the sequence number
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn get_seq_num(&self) -> u64 {
         match self {
             ClientMessage::Register { seq_num, .. } => *seq_num,
@@ -316,7 +324,11 @@ pub enum Direction {
 }
 
 impl Direction {
-    // Converts a direction to a movement vector
+    /// Convert direction to a movement vector
+    ///
+    /// This function takes a direction and returns a movement vector.
+    /// The movement vector is a tuple of two f32 values representing the x and y components of the movement.
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn to_vector(self) -> (f32, f32) {
         // 1/sqrt(2) ≈ 0.7071 is the correct normalization factor for diagonal movement
         // This ensures that diagonal movement has the same speed as cardinal movement
@@ -414,7 +426,8 @@ pub enum EmoteType {
 }
 
 impl EmoteType {
-    // Get a display string for the emote
+    /// Get a display string for the emote
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn display_text(&self) -> &'static str {
         match self {
             EmoteType::Wave => "waves hello",
@@ -429,7 +442,8 @@ impl EmoteType {
         }
     }
 
-    // Get a visual representation of the emote for display
+    /// Get a visual representation of the emote for display
+    #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn display_icon(&self) -> &'static str {
         match self {
             EmoteType::Wave => "👋",

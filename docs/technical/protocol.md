@@ -68,11 +68,27 @@ All messages are authenticated using HMAC-SHA256 to ensure integrity and prevent
 
 ## Replay Protection
 
-To prevent replay attacks, the protocol implements a sliding window mechanism:
+To prevent replay attacks, the protocol implements a robust sliding window mechanism on both client and server:
 
-1. Each message includes a sequence number
-2. The server maintains a window of recently seen sequence numbers
+1. Each message includes a unique sequence number
+2. Both client and server maintain a window of recently seen sequence numbers
 3. Messages with sequence numbers outside the window or already seen are rejected
 4. The window advances as new valid messages are received
+5. The system implements a 128-bit bitmap for efficient tracking of out-of-order messages
+6. The window size is configurable, with a default of 64 sequence numbers
 
-This system ensures that captured messages cannot be replayed by an attacker.
+This bidirectional replay protection ensures that captured messages cannot be replayed by an attacker in either direction, protecting both client and server from replay attacks.
+
+## Message Pacing
+
+To enhance privacy and prevent timing correlation attacks, the protocol implements a sophisticated message pacing system:
+
+1. Messages are sent with configurable time intervals between them
+2. Random jitter is added to the intervals to prevent predictable timing patterns
+3. The client supports adjustable pacing intervals to balance privacy and responsiveness
+4. The pacing system includes:
+   - Base interval: Configurable minimum delay between messages
+   - Random jitter: Variable delay added to the base interval
+   - Monitoring: Real-time visualization of pacing effects
+
+This message pacing system helps prevent traffic analysis and timing correlation attacks that could compromise user privacy, even when using the Nym mixnet's existing protections.
