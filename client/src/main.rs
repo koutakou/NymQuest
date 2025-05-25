@@ -384,7 +384,7 @@ async fn process_user_command(
         "down" | "d" | "south" | "s" => {
             handle_movement_direction(network, game_state, Direction::Down, config).await?
         }
-        "left" | "l" | "west" | "w" => {
+        "left" | "l" | "west" => {
             handle_movement_direction(network, game_state, Direction::Left, config).await?
         }
         "right" | "east" | "e" => {
@@ -457,6 +457,52 @@ async fn process_user_command(
             network.send_message(chat_msg).await?;
             info!("Chat message sent...");
         }
+        // Whisper command
+        "whisper" | "wh" | "msg" | "tell" => {
+            // Check if player is registered
+            if let Ok(state) = game_state.lock() {
+                if !state.is_registered() {
+                    info!("You need to register first before you can send whispers.");
+                    return Ok(());
+                }
+            } else {
+                error!("Failed to access game state for registration check. Please restart the client.");
+                return Ok(());
+            }
+
+            if command_parts.len() < 3 {
+                info!("Usage: whisper <player_display_id> <message>");
+                return Ok(());
+            }
+
+            let target_display_id = command_parts[1].to_string();
+            let message_text = command_parts[2..].join(" ");
+
+            // Verify the target player exists
+            let player_id = if let Ok(state) = game_state.lock() {
+                state.get_player_id_by_display_id(&target_display_id)
+            } else {
+                None
+            };
+
+            if player_id.is_none() {
+                info!(
+                    "Player with display name '{}' not found.",
+                    target_display_id
+                );
+                return Ok(());
+            }
+
+            // Create the whisper message
+            let whisper_msg = ClientMessage::Whisper {
+                target_display_id: target_display_id.clone(),
+                message: message_text.clone(),
+                seq_num: 0, // Will be set by NetworkManager
+            };
+
+            network.send_message(whisper_msg).await?;
+            info!("Whisper to '{}' sent...", target_display_id);
+        }
         // Emote command
         "emote" | "em" => {
             // Check if player is registered
@@ -501,6 +547,57 @@ async fn process_user_command(
         // Help command
         "help" | "h" | "?" => {
             render_help_section();
+            return Ok(());
+        }
+        // Alias for whisper command
+        "reply" | "re" => {
+            if command_parts.len() < 2 {
+                info!("Usage: reply <message>");
+                return Ok(());
+            }
+
+            // Get the last whisper sender from game state
+            let (last_whisper_sender, player_id) = if let Ok(state) = game_state.lock() {
+                let sender = state.get_last_whisper_sender().map(|s| s.to_string());
+                let player_id = sender
+                    .as_ref()
+                    .and_then(|name| state.get_player_id_by_display_id(name));
+                (sender, player_id)
+            } else {
+                error!("Failed to access game state. Please restart the client.");
+                return Ok(());
+            };
+
+            if let Some(sender) = last_whisper_sender {
+                // Check if we can get the connection tag for the player
+                let connection_tag = if let (Some(pid), Ok(state)) = (&player_id, game_state.lock())
+                {
+                    state.get_connection_tag(pid)
+                } else {
+                    None
+                };
+
+                // Construct the whisper message
+                let message_text = command_parts[1..].join(" ");
+                let whisper_msg = ClientMessage::Whisper {
+                    target_display_id: sender.clone(),
+                    message: message_text.clone(),
+                    seq_num: 0, // Will be set by NetworkManager
+                };
+
+                // Send the message
+                network.send_message(whisper_msg).await?;
+
+                // Log success message with connection tag info if available
+                if let Some(tag) = connection_tag {
+                    info!("Reply to '{}' (connection: {}) sent...", sender, tag);
+                } else {
+                    info!("Reply to '{}' sent...", sender);
+                }
+            } else {
+                info!("No one to reply to! You haven't received any whispers yet.");
+            }
+
             return Ok(());
         }
         // Message pacing commands for privacy protection
@@ -735,23 +832,12 @@ async fn handle_movement_direction(
     Ok(())
 }
 
-/// Process a message received from the server
-/// Returns true if the message was a chat message that should refresh the display
-/// Returns false on error or non-chat messages
+/// Process a message from the server
+/// Returns true if the message was a chat-like message that should force a UI refresh
 fn process_server_message(
     game_state: &Arc<Mutex<GameState>>,
     server_message: ServerMessage,
 ) -> bool {
-    // Safely lock the game state and handle potential poisoning
-    let mut state = match game_state.lock() {
-        Ok(state) => state,
-        Err(e) => {
-            // Handle poisoned mutex
-            error!("Error accessing game state: {}", e);
-            return false; // Return false to avoid refresh
-        }
-    };
-
     match server_message {
         ServerMessage::ServerShutdown {
             message,
@@ -765,7 +851,9 @@ fn process_server_message(
             );
 
             // Add to chat history as a system message
-            state.add_chat_message("SERVER SHUTDOWN".to_string(), warning.clone());
+            if let Ok(mut state) = game_state.lock() {
+                state.add_system_message("SERVER SHUTDOWN".to_string(), warning.clone());
+            }
 
             // Print a very visible warning in the console
             error!(
@@ -784,71 +872,99 @@ fn process_server_message(
             negotiated_version: _,
             seq_num: _,
         } => {
-            state.set_player_id(player_id);
-            state.set_world_boundaries(world_boundaries);
-            info!("Registration successful! Received world boundaries from server.");
-            render_game_state(&state);
+            if let Ok(mut state) = game_state.lock() {
+                state.set_player_id(player_id.clone());
+                state.set_world_boundaries(world_boundaries);
+                info!(
+                    "Registration successful! Your player ID is: {}",
+                    player_id.green()
+                );
+            } else {
+                error!("Failed to update game state with registration info");
+            }
             false
         }
         ServerMessage::GameState {
             players,
             seq_num: _,
         } => {
-            // Debugging output
-            info!("Received game state with {} players", players.len());
-
-            // Print player IDs
-            for player_id in players.keys() {
-                info!("  - Player ID: {}", player_id.cyan());
+            if let Ok(mut state) = game_state.lock() {
+                state.update_players(players);
+            } else {
+                error!("Failed to update game state with players info");
             }
-
-            state.update_players(players);
-
-            // Render game state immediately to update the mini-map
-            render_game_state(&state);
             false
-        }
-        ServerMessage::Event {
-            message,
-            seq_num: _,
-        } => {
-            // Add events to chat history as system messages
-            state.add_chat_message("System".to_string(), message.clone());
-            info!("Event: {}", message.yellow());
-            true
         }
         ServerMessage::ChatMessage {
             sender_name,
             message,
             seq_num: _,
         } => {
-            // Add message to chat history
-            state.add_chat_message(sender_name.clone(), message.clone());
-
-            // Also print it for immediate visibility
-            info!("[{}]: {}", sender_name.green(), message.white());
+            if let Ok(mut state) = game_state.lock() {
+                state.add_chat_message(sender_name.clone(), message.clone());
+            } else {
+                error!("Failed to add chat message to game state");
+            }
+            info!("{}: {}", sender_name.cyan(), message);
+            true
+        }
+        ServerMessage::WhisperMessage {
+            sender_name,
+            message,
+            seq_num: _,
+        } => {
+            if let Ok(mut state) = game_state.lock() {
+                state.add_whisper_message(sender_name.clone(), message.clone());
+            } else {
+                error!("Failed to add whisper message to game state");
+            }
+            info!(
+                "{} {} {}",
+                "[Whisper from".magenta(),
+                sender_name.magenta().bold(),
+                "]".magenta()
+            );
+            info!("{}", message.magenta().italic());
+            true
+        }
+        ServerMessage::Event {
+            message,
+            seq_num: _,
+        } => {
+            if let Ok(mut state) = game_state.lock() {
+                state.add_system_message("System".to_string(), message.clone());
+            } else {
+                error!("Failed to add event message to game state");
+            }
+            info!("Event: {}", message.yellow());
             true
         }
         ServerMessage::Error {
             message,
             seq_num: _,
         } => {
-            // Add errors to chat history as system messages
-            state.add_chat_message("System Error".to_string(), message.clone());
+            if let Ok(mut state) = game_state.lock() {
+                state.add_system_message("System Error".to_string(), message.clone());
+            } else {
+                error!("Failed to add error message to game state");
+            }
             error!("Error: {}", message.red());
             true
         }
-        ServerMessage::Ack {
-            client_seq_num: _,
-            original_type: _,
-        } => {
+        ServerMessage::Ack { .. } => {
             // Acknowledgments are handled in the NetworkManager
-            // We don't need to do anything here
             false
         }
-        ServerMessage::HeartbeatRequest { seq_num: _ } => {
+        ServerMessage::HeartbeatRequest { .. } => {
             // Heartbeat requests are handled in the NetworkManager
-            // We don't need to do anything here in the main loop
+            false
+        }
+        ServerMessage::PlayerLeft { .. } => {
+            // Player left messages update the game state but don't need special UI refresh
+            false
+        }
+        ServerMessage::PlayerUpdate { .. } => {
+            // Player updates are handled by GameState updates
             false
         }
     }

@@ -580,7 +580,119 @@ pub async fn handle_client_message(
             // Already handled above
             Ok(())
         }
+        ClientMessage::Whisper {
+            target_display_id,
+            message,
+            seq_num,
+        } => {
+            debug!("Processing whisper message with seq_num: {}", seq_num);
+
+            // Send acknowledgment first
+            send_ack(
+                client,
+                &sender_tag,
+                seq_num,
+                ClientMessageType::Whisper,
+                auth_key,
+            )
+            .await?;
+
+            // Handle the whisper message
+            handle_whisper(
+                client,
+                game_state,
+                target_display_id,
+                message,
+                sender_tag,
+                auth_key,
+            )
+            .await
+        }
     }
+}
+
+/// Handle a private message (whisper) between players
+async fn handle_whisper(
+    client: &MixnetClient,
+    game_state: &Arc<GameState>,
+    target_display_id: String,
+    message: String,
+    sender_tag: AnonymousSenderTag,
+    auth_key: &AuthKey,
+) -> Result<()> {
+    // Find the player ID from sender tag
+    let sender_id = match game_state.get_player_id(&sender_tag) {
+        Some(id) => id,
+        None => {
+            // Player not found (not registered)
+            let error_msg = ServerMessage::Error {
+                message: "You must be registered to send whispers".to_string(),
+                seq_num: next_seq_num(),
+            };
+            let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+            let error_json = serde_json::to_string(&authenticated_error)?;
+            client.send_reply(sender_tag, error_json).await?;
+            return Ok(());
+        }
+    };
+
+    // Get the sender's player data
+    let sender_name = match game_state.get_player(&sender_id) {
+        Some(player) => player.name.clone(),
+        None => {
+            // This shouldn't happen if get_player_id worked, but just in case
+            return Ok(());
+        }
+    };
+
+    // Find the target player by display ID
+    let target_player_id = match game_state.get_player_id_by_display_id(&target_display_id) {
+        Some(id) => id,
+        None => {
+            // Target player not found
+            let error_msg = ServerMessage::Error {
+                message: format!("Player '{}' not found", target_display_id),
+                seq_num: next_seq_num(),
+            };
+            let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+            let error_json = serde_json::to_string(&authenticated_error)?;
+            client.send_reply(sender_tag, error_json).await?;
+            return Ok(());
+        }
+    };
+
+    // Get the target player's connection tag
+    let target_tag = match game_state.get_connection_tag(&target_player_id) {
+        Some(tag) => tag,
+        None => {
+            // Target player doesn't have an active connection
+            let error_msg = ServerMessage::Error {
+                message: format!("Player '{}' is not connected", target_display_id),
+                seq_num: next_seq_num(),
+            };
+            let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+            let error_json = serde_json::to_string(&authenticated_error)?;
+            client.send_reply(sender_tag, error_json).await?;
+            return Ok(());
+        }
+    };
+
+    // Send the whisper message to the target player
+    let whisper_msg = ServerMessage::WhisperMessage {
+        sender_name,
+        message,
+        seq_num: next_seq_num(),
+    };
+
+    let authenticated_whisper = AuthenticatedMessage::new(whisper_msg, auth_key)?;
+    let whisper_json = serde_json::to_string(&authenticated_whisper)?;
+    client.send_reply(target_tag, whisper_json).await?;
+
+    debug!(
+        "Sent whisper from player {} to {}",
+        sender_id, target_display_id
+    );
+    Ok(())
 }
 
 /// Handle player movement

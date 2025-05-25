@@ -94,6 +94,7 @@ pub enum ClientMessageType {
     Disconnect,
     Heartbeat,
     Ack,
+    Whisper,
 }
 
 // Message types that the client can send to the server
@@ -138,6 +139,12 @@ pub enum ClientMessage {
         server_seq_num: u64,
         original_type: ServerMessageType,
     },
+    // Private message (whisper) to another player
+    Whisper {
+        target_display_id: String,
+        message: String,
+        seq_num: u64,
+    },
 }
 
 // Type of server message (used for acknowledgements)
@@ -153,6 +160,7 @@ pub enum ServerMessageType {
     PlayerLeft,
     PlayerUpdate,
     ServerShutdown,
+    WhisperMessage,
 }
 
 // Message types that the server can send to the client
@@ -216,6 +224,12 @@ pub enum ServerMessage {
         health: u32,
         seq_num: u64,
     },
+    // Private message (whisper) from another player
+    WhisperMessage {
+        sender_name: String,
+        message: String,
+        seq_num: u64,
+    },
 }
 
 // Helper implementation for ServerMessage to get metadata easily
@@ -233,6 +247,7 @@ impl ServerMessage {
             ServerMessage::Ack { .. } => ServerMessageType::Ack,
             ServerMessage::PlayerLeft { .. } => ServerMessageType::PlayerLeft,
             ServerMessage::PlayerUpdate { .. } => ServerMessageType::PlayerUpdate,
+            ServerMessage::WhisperMessage { .. } => ServerMessageType::WhisperMessage,
         }
     }
 
@@ -249,6 +264,7 @@ impl ServerMessage {
             ServerMessage::Ack { client_seq_num, .. } => *client_seq_num,
             ServerMessage::PlayerLeft { seq_num, .. } => *seq_num,
             ServerMessage::PlayerUpdate { seq_num, .. } => *seq_num,
+            ServerMessage::WhisperMessage { seq_num, .. } => *seq_num,
         }
     }
 }
@@ -266,6 +282,7 @@ impl ClientMessage {
             ClientMessage::Disconnect { .. } => ClientMessageType::Disconnect,
             ClientMessage::Heartbeat { .. } => ClientMessageType::Heartbeat,
             ClientMessage::Ack { .. } => ClientMessageType::Ack,
+            ClientMessage::Whisper { .. } => ClientMessageType::Whisper,
         }
     }
 
@@ -280,6 +297,7 @@ impl ClientMessage {
             ClientMessage::Disconnect { seq_num, .. } => *seq_num,
             ClientMessage::Heartbeat { seq_num, .. } => *seq_num,
             ClientMessage::Ack { server_seq_num, .. } => *server_seq_num,
+            ClientMessage::Whisper { seq_num, .. } => *seq_num,
         }
     }
 }

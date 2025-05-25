@@ -3,7 +3,7 @@ use colored::*;
 use std::io::{self, Write};
 
 use crate::game_protocol::Position;
-use crate::game_state::GameState;
+use crate::game_state::{GameState, MessageType};
 
 /// Constants for critical hit detection in messages
 const CRITICAL_HIT_MARKER: &str = "CRITICAL HIT";
@@ -194,31 +194,60 @@ pub fn render_chat_history(state: &GameState, max_messages: usize) {
                 msg.content.white()
             };
 
-            // Format based on sender type
-            match msg.sender.as_str() {
-                "System" => {
-                    println!("{} {}", time_str.yellow(), content_formatted);
+            // Format based on message type and sender
+            match msg.message_type {
+                MessageType::Whisper => {
+                    // Private whisper messages
+                    if Some(&msg.sender) == state.player_id.as_ref() {
+                        // Whisper sent by current player
+                        println!(
+                            "{} {} {}",
+                            time_str.magenta(),
+                            "[You whispered]:".magenta().bold(),
+                            content_formatted.magenta()
+                        );
+                    } else {
+                        // Whisper received from another player
+                        println!(
+                            "{} {} {}",
+                            time_str.magenta(),
+                            format!("[Whisper from {}]:", msg.sender).magenta().bold(),
+                            content_formatted.magenta()
+                        );
+                    }
                 }
-                "System Error" => {
-                    println!("{} {}", time_str.yellow(), content_formatted.red().bold());
+                MessageType::System => {
+                    // System messages
+                    println!("{} {}", time_str.yellow(), content_formatted.yellow());
                 }
-                sender if Some(sender) == state.player_id.as_deref() => {
-                    // Current player's messages
-                    println!(
-                        "{} {} {}",
-                        time_str.blue(),
-                        "[You]:".blue().bold(),
-                        content_formatted
-                    );
-                }
-                _ => {
-                    // Other players' messages
-                    println!(
-                        "{} {} {}",
-                        time_str.green(),
-                        format!("[{}]:", msg.sender).green().bold(),
-                        content_formatted
-                    );
+                MessageType::Chat => {
+                    // Regular chat messages
+                    match msg.sender.as_str() {
+                        "System" => {
+                            println!("{} {}", time_str.yellow(), content_formatted);
+                        }
+                        "System Error" => {
+                            println!("{} {}", time_str.yellow(), content_formatted.red().bold());
+                        }
+                        sender if Some(sender) == state.player_id.as_deref() => {
+                            // Current player's messages
+                            println!(
+                                "{} {} {}",
+                                time_str.blue(),
+                                "[You]:".blue().bold(),
+                                content_formatted
+                            );
+                        }
+                        _ => {
+                            // Other players' messages
+                            println!(
+                                "{} {} {}",
+                                time_str.green(),
+                                format!("[{}]:", msg.sender).green().bold(),
+                                content_formatted
+                            );
+                        }
+                    }
                 }
             }
         }

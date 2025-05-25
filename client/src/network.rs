@@ -76,6 +76,10 @@ pub enum OriginalMessage {
     },
     Disconnect,
     Heartbeat,
+    Whisper {
+        target_display_id: String,
+        message: String,
+    },
 }
 
 pub struct NetworkManager {
@@ -248,6 +252,15 @@ impl NetworkManager {
                     seq_num,
                 },
                 ClientMessage::Chat { message, .. } => ClientMessage::Chat { message, seq_num },
+                ClientMessage::Whisper {
+                    target_display_id,
+                    message,
+                    ..
+                } => ClientMessage::Whisper {
+                    target_display_id,
+                    message,
+                    seq_num,
+                },
                 ClientMessage::Emote { emote_type, .. } => ClientMessage::Emote {
                     emote_type,
                     seq_num,
@@ -282,6 +295,14 @@ impl NetworkManager {
                     target_display_id: target_display_id.clone(),
                 },
                 ClientMessage::Chat { message, .. } => OriginalMessage::Chat {
+                    message: message.clone(),
+                },
+                ClientMessage::Whisper {
+                    target_display_id,
+                    message,
+                    ..
+                } => OriginalMessage::Whisper {
+                    target_display_id: target_display_id.clone(),
                     message: message.clone(),
                 },
                 ClientMessage::Emote { emote_type, .. } => OriginalMessage::Emote {
@@ -458,6 +479,17 @@ impl NetworkManager {
                             seq_num,
                         }
                     }
+                    OriginalMessage::Whisper {
+                        target_display_id,
+                        message,
+                    } => {
+                        debug!("Resending Whisper to {}", target_display_id);
+                        ClientMessage::Whisper {
+                            target_display_id: target_display_id.clone(),
+                            message: message.clone(),
+                            seq_num,
+                        }
+                    }
                 }
             } else {
                 // Fallback if original message is somehow not available
@@ -488,6 +520,14 @@ impl NetworkManager {
                         // Default to a wave emote for resends
                         ClientMessage::Emote {
                             emote_type: EmoteType::Wave,
+                            seq_num,
+                        }
+                    }
+                    ClientMessageType::Whisper => {
+                        // Default to a generic whisper for resends
+                        ClientMessage::Whisper {
+                            target_display_id: "unknown".to_string(),
+                            message: format!("[Resend_{}]", seq_num),
                             seq_num,
                         }
                     }
@@ -800,6 +840,10 @@ impl NetworkManager {
             ServerMessage::ChatMessage { .. } => {
                 // ChatMessage acknowledges Chat
                 self.find_pending_message_by_type(ClientMessageType::Chat)
+            }
+            ServerMessage::WhisperMessage { .. } => {
+                // WhisperMessage acknowledges Whisper
+                self.find_pending_message_by_type(ClientMessageType::Whisper)
             }
             _ => None,
         }

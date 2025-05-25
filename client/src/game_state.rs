@@ -5,11 +5,23 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use crate::game_protocol::{Player, WorldBoundaries};
 use crate::status_monitor::StatusMonitor;
 
-/// Represents a chat message with sender, content and timestamp
+/// Represents a chat message with sender, content, timestamp, and message type
 pub struct ChatMessage {
     pub sender: String,
     pub content: String,
     pub timestamp: u64,
+    pub message_type: MessageType,
+}
+
+/// Type of message for display purposes
+#[derive(Clone, Copy, PartialEq)]
+pub enum MessageType {
+    /// Regular public chat message
+    Chat,
+    /// Private whisper message
+    Whisper,
+    /// System message
+    System,
 }
 
 /// Structure to hold client state
@@ -25,6 +37,8 @@ pub struct GameState {
     /// World boundaries received from server during registration
     pub world_boundaries: Option<WorldBoundaries>,
     pub status_monitor: Arc<Mutex<StatusMonitor>>,
+    /// Last whisper sender name - for reply functionality
+    pub last_whisper_sender: Option<String>,
 }
 
 impl GameState {
@@ -39,6 +53,7 @@ impl GameState {
             max_chat_history: 50,
             world_boundaries: None,
             status_monitor: Arc::new(Mutex::new(StatusMonitor::new())),
+            last_whisper_sender: None,
         }
     }
 
@@ -92,6 +107,7 @@ impl GameState {
             sender,
             content,
             timestamp,
+            message_type: MessageType::Chat,
         };
 
         // Add to history (most recent at the end)
@@ -101,6 +117,64 @@ impl GameState {
         while self.chat_history.len() > self.max_chat_history {
             self.chat_history.pop_front();
         }
+    }
+
+    /// Add a system message to the history
+    pub fn add_system_message(&mut self, sender: String, content: String) {
+        // Get current timestamp in milliseconds
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Create a new system message
+        let message = ChatMessage {
+            sender,
+            content,
+            timestamp,
+            message_type: MessageType::System,
+        };
+
+        // Add to history (most recent at the end)
+        self.chat_history.push_back(message);
+
+        // Ensure we don't exceed the maximum history size
+        while self.chat_history.len() > self.max_chat_history {
+            self.chat_history.pop_front();
+        }
+    }
+
+    /// Add a whisper message to the history and update the last whisper sender
+    pub fn add_whisper_message(&mut self, sender: String, content: String) {
+        // Get current timestamp in milliseconds
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as u64;
+
+        // Create a new whisper message
+        let message = ChatMessage {
+            sender: sender.clone(),
+            content,
+            timestamp,
+            message_type: MessageType::Whisper,
+        };
+
+        // Add to history (most recent at the end)
+        self.chat_history.push_back(message);
+
+        // Update the last whisper sender for reply functionality
+        self.last_whisper_sender = Some(sender);
+
+        // Ensure we don't exceed the maximum history size
+        while self.chat_history.len() > self.max_chat_history {
+            self.chat_history.pop_front();
+        }
+    }
+
+    /// Get the last whisper sender if any
+    pub fn get_last_whisper_sender(&self) -> Option<&String> {
+        self.last_whisper_sender.as_ref()
     }
 
     /// Get a slice of the most recent chat messages
@@ -119,5 +193,28 @@ impl GameState {
     /// Get world boundaries if available
     pub fn get_world_boundaries(&self) -> Option<&WorldBoundaries> {
         self.world_boundaries.as_ref()
+    }
+
+    /// Get player ID by display ID/name (case insensitive)
+    pub fn get_player_id_by_display_id(&self, display_id: &str) -> Option<String> {
+        // Case insensitive comparison
+        let lowercase_target = display_id.to_lowercase();
+
+        // Find the player with the matching display_id and return their ID
+        for (id, player) in &self.players {
+            if player.display_id.to_lowercase() == lowercase_target {
+                return Some(id.clone());
+            }
+        }
+        None
+    }
+
+    /// Get connection tag for a player by ID
+    pub fn get_connection_tag(&self, player_id: &str) -> Option<String> {
+        // Find the player with the matching ID and return their name as the connection tag
+        // Note: In the actual implementation, we may need a different field depending on how connections are tracked
+        self.players
+            .get(player_id)
+            .map(|player| player.name.clone())
     }
 }

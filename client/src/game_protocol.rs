@@ -130,6 +130,12 @@ pub enum ClientMessage {
         server_seq_num: u64,
         original_type: ServerMessageType,
     },
+    // Private message (whisper) to another player
+    Whisper {
+        target_display_id: String,
+        message: String,
+        seq_num: u64,
+    },
 }
 
 // Type of server message (used for acknowledgements)
@@ -142,7 +148,10 @@ pub enum ServerMessageType {
     Error,
     HeartbeatRequest,
     Ack,
+    PlayerLeft,
+    PlayerUpdate,
     ServerShutdown,
+    WhisperMessage,
 }
 
 // Message types that the server can send to the client
@@ -194,6 +203,24 @@ pub enum ServerMessage {
         client_seq_num: u64,
         original_type: ClientMessageType,
     },
+    // Player departed
+    PlayerLeft {
+        display_id: String,
+        seq_num: u64,
+    },
+    // Player status update
+    PlayerUpdate {
+        display_id: String,
+        position: Position,
+        health: u32,
+        seq_num: u64,
+    },
+    // Private message (whisper) from another player
+    WhisperMessage {
+        sender_name: String,
+        message: String,
+        seq_num: u64,
+    },
 }
 
 // Type of client message (used for acknowledgements)
@@ -207,6 +234,7 @@ pub enum ClientMessageType {
     Disconnect,
     Heartbeat,
     Ack,
+    Whisper,
 }
 
 impl ServerMessage {
@@ -219,9 +247,12 @@ impl ServerMessage {
             ServerMessage::GameState { .. } => ServerMessageType::GameState,
             ServerMessage::Event { .. } => ServerMessageType::Event,
             ServerMessage::ChatMessage { .. } => ServerMessageType::ChatMessage,
+            ServerMessage::WhisperMessage { .. } => ServerMessageType::WhisperMessage,
             ServerMessage::Error { .. } => ServerMessageType::Error,
             ServerMessage::HeartbeatRequest { .. } => ServerMessageType::HeartbeatRequest,
             ServerMessage::Ack { .. } => ServerMessageType::Ack,
+            ServerMessage::PlayerLeft { .. } => ServerMessageType::PlayerLeft,
+            ServerMessage::PlayerUpdate { .. } => ServerMessageType::PlayerUpdate,
         }
     }
 
@@ -234,9 +265,12 @@ impl ServerMessage {
             ServerMessage::GameState { seq_num, .. } => *seq_num,
             ServerMessage::Event { seq_num, .. } => *seq_num,
             ServerMessage::ChatMessage { seq_num, .. } => *seq_num,
+            ServerMessage::WhisperMessage { seq_num, .. } => *seq_num,
             ServerMessage::Error { seq_num, .. } => *seq_num,
             ServerMessage::HeartbeatRequest { seq_num, .. } => *seq_num,
             ServerMessage::Ack { client_seq_num, .. } => *client_seq_num,
+            ServerMessage::PlayerLeft { seq_num, .. } => *seq_num,
+            ServerMessage::PlayerUpdate { seq_num, .. } => *seq_num,
         }
     }
 }
@@ -250,6 +284,7 @@ impl ClientMessage {
             ClientMessage::Move { .. } => ClientMessageType::Move,
             ClientMessage::Attack { .. } => ClientMessageType::Attack,
             ClientMessage::Chat { .. } => ClientMessageType::Chat,
+            ClientMessage::Whisper { .. } => ClientMessageType::Whisper,
             ClientMessage::Emote { .. } => ClientMessageType::Emote,
             ClientMessage::Disconnect { .. } => ClientMessageType::Disconnect,
             ClientMessage::Heartbeat { .. } => ClientMessageType::Heartbeat,
@@ -265,6 +300,7 @@ impl ClientMessage {
             ClientMessage::Move { seq_num, .. } => *seq_num,
             ClientMessage::Attack { seq_num, .. } => *seq_num,
             ClientMessage::Chat { seq_num, .. } => *seq_num,
+            ClientMessage::Whisper { seq_num, .. } => *seq_num,
             ClientMessage::Emote { seq_num, .. } => *seq_num,
             ClientMessage::Disconnect { seq_num, .. } => *seq_num,
             ClientMessage::Heartbeat { seq_num, .. } => *seq_num,

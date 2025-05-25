@@ -314,11 +314,14 @@ impl GameState {
     }
 
     /// Find a player's internal ID from their display ID
+    /// This lookup is case-insensitive to improve user experience
     pub fn get_player_id_by_display_id(&self, display_id: &str) -> Option<String> {
+        let lowercase_target = display_id.to_lowercase();
         match self.players.read() {
             Ok(players) => {
                 for (id, player) in players.iter() {
-                    if player.display_id == display_id {
+                    // Case insensitive comparison
+                    if player.display_id.to_lowercase() == lowercase_target {
                         return Some(id.clone());
                     }
                 }
@@ -581,6 +584,13 @@ impl GameState {
                 None
             }
         }
+    }
+
+    /// Get connection tag (sender tag) for a player by their player ID
+    /// This is used for direct communication, such as sending whisper messages
+    pub fn get_connection_tag(&self, player_id: &str) -> Option<AnonymousSenderTag> {
+        // This is essentially the same as get_sender_tag_by_player_id but with a public interface
+        self.get_sender_tag_by_player_id(player_id)
     }
 
     /// Function to generate a random position that is not already occupied by another player
