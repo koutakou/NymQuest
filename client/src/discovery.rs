@@ -211,14 +211,35 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let test_file = temp_dir.path().join(SERVER_ADDRESS_FILENAME);
 
-        // Create a test server address file
+        // Create a test server address file with a valid Nym address format
         let mut file = File::create(&test_file).unwrap();
         writeln!(file, "server.nym.test;dGVzdF9hdXRoX2tleQ==").unwrap();
+        // Flush to ensure the content is written
+        file.flush().unwrap();
+        drop(file); // Explicitly close the file
 
-        // Set environment variable to point to our test file
-        env::set_var(SERVER_ADDRESS_ENV_VAR, &test_file);
+        // Convert to canonical path to avoid any path resolution issues
+        let canonical_path = test_file.canonicalize().unwrap();
+
+        // Set environment variable to point to our test file using canonical path
+        env::set_var(
+            SERVER_ADDRESS_ENV_VAR,
+            canonical_path.to_string_lossy().to_string(),
+        );
+
+        // Verify the file exists and has content
+        assert!(
+            canonical_path.exists(),
+            "Test file does not exist at: {:?}",
+            canonical_path
+        );
+        let content = fs::read_to_string(&canonical_path).unwrap();
+        assert!(!content.trim().is_empty(), "Test file is empty");
 
         let result = load_server_connection_info();
+        if let Err(ref e) = result {
+            eprintln!("Test error: {}", e);
+        }
         assert!(result.is_ok());
 
         let (address, key) = result.unwrap();
