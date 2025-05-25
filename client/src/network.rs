@@ -118,6 +118,53 @@ fn calculate_max_jitter(base_interval_ms: u64, jitter_percent: u8) -> u64 {
     (base_interval_ms * capped_percent) / 100
 }
 
+/// Apply message pacing with jitter to enhance privacy by preventing timing correlation attacks
+/// Returns the applied jitter in milliseconds
+async fn apply_message_pacing(
+    last_message_sent: Option<Instant>,
+    pacing_interval_ms: u64,
+    jitter_percent: u8,
+    status_monitor: &Arc<Mutex<StatusMonitor>>,
+) -> u64 {
+    // If pacing is disabled or no interval is set, return immediately
+    if pacing_interval_ms == 0 {
+        // Update status monitor to show pacing is disabled
+        if let Ok(mut monitor) = status_monitor.lock() {
+            monitor.update_message_pacing(false, 0, 0);
+        }
+        return 0;
+    }
+
+    // Calculate jitter to add randomness to timing (prevents timing analysis)
+    let mut rng = rand::thread_rng();
+    let max_jitter = calculate_max_jitter(pacing_interval_ms, jitter_percent);
+    let jitter_ms = rng.gen_range(0..=max_jitter);
+
+    // Update status monitor with the applied jitter
+    if let Ok(mut monitor) = status_monitor.lock() {
+        monitor.update_message_pacing(true, pacing_interval_ms, jitter_ms);
+    }
+
+    // If we have a previous message timestamp, calculate and apply appropriate delay
+    if let Some(last_sent) = last_message_sent {
+        let elapsed = last_sent.elapsed().as_millis() as u64;
+        let total_interval = pacing_interval_ms + jitter_ms;
+
+        if elapsed < total_interval {
+            let wait_ms = total_interval - elapsed;
+            trace!(
+                "Pacing message, waiting {}ms ({}ms base + {}ms jitter)",
+                wait_ms,
+                pacing_interval_ms,
+                jitter_ms
+            );
+            time::sleep(Duration::from_millis(wait_ms)).await;
+        }
+    }
+
+    jitter_ms
+}
+
 impl NetworkManager {
     /// Create a new NetworkManager and connect to the Nym network
     pub async fn new(
@@ -195,37 +242,14 @@ impl NetworkManager {
         let seq_num = self.next_seq_num();
 
         // Apply message pacing for privacy enhancement if enabled
-        if self.pacing_enabled && self.pacing_interval_ms > 0 {
-            // Calculate jitter based on percentage from config for enhanced privacy (timing obfuscation)
-            let mut rng = rand::thread_rng();
-            let max_jitter = calculate_max_jitter(
+        if self.pacing_enabled {
+            self.last_applied_jitter_ms = apply_message_pacing(
+                self.last_message_sent,
                 self.pacing_interval_ms,
                 self.config.message_pacing_jitter_percent,
-            );
-            let jitter_ms = rng.gen_range(0..=max_jitter);
-            self.last_applied_jitter_ms = jitter_ms;
-
-            // Update status monitor with the applied jitter
-            if let Ok(mut monitor) = self.status_monitor.lock() {
-                monitor.update_message_pacing(true, self.pacing_interval_ms, jitter_ms);
-            }
-
-            // Calculate the time to wait based on pacing interval and last message sent
-            if let Some(last_sent) = self.last_message_sent {
-                let elapsed = last_sent.elapsed().as_millis() as u64;
-                let total_interval = self.pacing_interval_ms + jitter_ms;
-
-                if elapsed < total_interval {
-                    let wait_ms = total_interval - elapsed;
-                    trace!(
-                        "Pacing message, waiting {}ms ({}ms base + {}ms jitter)",
-                        wait_ms,
-                        self.pacing_interval_ms,
-                        jitter_ms
-                    );
-                    time::sleep(Duration::from_millis(wait_ms)).await;
-                }
-            }
+                &self.status_monitor,
+            )
+            .await;
 
             // Update the last message sent timestamp
             self.last_message_sent = Some(Instant::now());
@@ -238,45 +262,19 @@ impl NetworkManager {
         }
         self.rate_limit_tokens = self.rate_limit_tokens.saturating_sub(1);
 
-        // Apply message pacing with jitter if enabled
-        if self.pacing_enabled {
-            if let Some(last_sent) = self.last_message_sent {
-                let mut rng = rand::thread_rng();
-                let max_jitter = calculate_max_jitter(
-                    self.pacing_interval_ms,
-                    self.config.message_pacing_jitter_percent,
-                );
-                let jitter_ms = rng.gen_range(0..=max_jitter);
-                self.last_applied_jitter_ms = jitter_ms;
-
-                // Calculate total delay including base interval and jitter
-                let total_delay_ms = self.pacing_interval_ms + jitter_ms;
-
-                // Calculate elapsed time since last message
-                let elapsed = last_sent.elapsed().as_millis() as u64;
-
-                // If not enough time has passed since last message, wait for the remaining time
-                if elapsed < total_delay_ms {
-                    let wait_time = total_delay_ms - elapsed;
-                    debug!(
-                        "Applying message pacing with {}ms delay ({}ms base + {}ms jitter)",
-                        wait_time, self.pacing_interval_ms, jitter_ms
-                    );
-
-                    // Update status monitor with pacing information
-                    if let Ok(mut monitor) = self.status_monitor.lock() {
-                        monitor.update_message_pacing(true, total_delay_ms, jitter_ms);
-                    }
-
-                    time::sleep(Duration::from_millis(wait_time)).await;
-                }
-            }
-        } else {
-            // Update status monitor to show pacing is disabled
-            if let Ok(mut monitor) = self.status_monitor.lock() {
-                monitor.update_message_pacing(false, 0, 0);
-            }
-        }
+        // Ensure message pacing is applied to prevent timing correlation attacks
+        // This enhances privacy by making it harder to identify patterns in message timing
+        self.last_applied_jitter_ms = apply_message_pacing(
+            self.last_message_sent,
+            if self.pacing_enabled {
+                self.pacing_interval_ms
+            } else {
+                0
+            },
+            self.config.message_pacing_jitter_percent,
+            &self.status_monitor,
+        )
+        .await;
 
         // Record time of message being sent (for future pacing)
         self.last_message_sent = Some(Instant::now());
