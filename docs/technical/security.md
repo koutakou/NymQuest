@@ -28,6 +28,16 @@ To prevent replay attacks, NymQuest implements:
 - **Sequence Numbers**: Each message contains a unique, incrementing sequence number
 - **Window Tracking**: Server maintains a window of recently seen sequence numbers
 - **Automatic Rejection**: Messages with invalid or repeated sequence numbers are discarded
+- **Configurable Window Size**: The replay protection window size is configurable via environment variables
+
+### Configurable Replay Protection
+
+The replay protection window size can be adjusted to balance security and resource usage:
+- **Client configuration**: Set `NYMQUEST_CLIENT_REPLAY_PROTECTION_WINDOW_SIZE` (default: 64)
+- **Server configuration**: Set `NYMQUEST_REPLAY_PROTECTION_WINDOW_SIZE` (default: 64)
+- **Valid range**: Values must be between 16 and 128
+- **Resource implications**: Larger windows provide better protection against sophisticated replay attacks but consume more memory
+- **Runtime adaptability**: Changes take effect on application restart
 
 ## DoS Protection & Rate Limiting
 

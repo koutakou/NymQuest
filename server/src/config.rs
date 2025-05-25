@@ -32,6 +32,7 @@ use tracing::{info, warn};
 /// - NYMQUEST_ENABLE_MESSAGE_PROCESSING_PACING: Enable message processing pacing for enhanced privacy (default: false)
 /// - NYMQUEST_STATE_BROADCAST_INTERVAL_SECONDS: Interval for broadcasting game state (default: 5)
 /// - NYMQUEST_INACTIVE_PLAYER_CLEANUP_INTERVAL_SECONDS: Interval for cleaning up inactive players (default: 45)
+/// - NYMQUEST_REPLAY_PROTECTION_WINDOW_SIZE: Number of sequence numbers to track for replay prevention (default: 64)
 #[derive(Debug, Clone)]
 pub struct GameConfig {
     /// Maximum X coordinate boundary for the game world
@@ -86,6 +87,8 @@ pub struct GameConfig {
     pub state_broadcast_interval_seconds: u64,
     /// Interval for cleaning up inactive players in seconds
     pub inactive_player_cleanup_interval_seconds: u64,
+    /// Replay protection window size (number of sequence numbers to track for replay prevention)
+    pub replay_protection_window_size: u8,
 }
 
 impl Default for GameConfig {
@@ -117,6 +120,7 @@ impl Default for GameConfig {
             enable_message_processing_pacing: false,
             state_broadcast_interval_seconds: 5,
             inactive_player_cleanup_interval_seconds: 45,
+            replay_protection_window_size: 64, // Default window size for replay protection
         }
     }
 }
@@ -197,6 +201,10 @@ impl GameConfig {
             "NYMQUEST_INACTIVE_PLAYER_CLEANUP_INTERVAL_SECONDS",
             config.inactive_player_cleanup_interval_seconds,
         )?;
+        config.replay_protection_window_size = Self::load_env_u8(
+            "NYMQUEST_REPLAY_PROTECTION_WINDOW_SIZE",
+            config.replay_protection_window_size,
+        )?;
 
         // Validate rate limiting settings
         if config.message_rate_limit <= 0.0 {
@@ -233,6 +241,10 @@ impl GameConfig {
         info!(
             "Max players: {}, Max name length: {}, Max chat length: {}",
             config.max_players, config.max_player_name_length, config.max_chat_message_length
+        );
+        info!(
+            "Replay protection window size: {}",
+            config.replay_protection_window_size
         );
 
         Ok(config)
@@ -348,10 +360,18 @@ impl GameConfig {
         }
 
         // Validate message processing pacing
-        if self.message_processing_interval_ms == 0 || self.message_processing_interval_ms > 10000 {
+        if self.message_processing_interval_ms > 2000 {
             return Err(anyhow!(
-                "Invalid message processing interval: {} (must be 1-10000ms)",
+                "Message pacing interval too large: {} (must be <= 2000ms)",
                 self.message_processing_interval_ms
+            ));
+        }
+
+        // Validate replay protection window size
+        if self.replay_protection_window_size < 16 || self.replay_protection_window_size > 128 {
+            return Err(anyhow!(
+                "Invalid replay protection window size: {} (must be 16-128)",
+                self.replay_protection_window_size
             ));
         }
 
@@ -437,8 +457,26 @@ impl GameConfig {
     fn load_env_usize(var_name: &str, default: usize) -> Result<usize> {
         match env::var(var_name) {
             Ok(val) => val
+                .trim()
                 .parse::<usize>()
                 .map_err(|e| anyhow!("Invalid usize value for {}: {} ({})", var_name, val, e)),
+            Err(_) => Ok(default),
+        }
+    }
+
+    /// Load a u8 value from an environment variable
+    fn load_env_u8(var_name: &str, default: u8) -> Result<u8> {
+        match env::var(var_name) {
+            Ok(val) => match val.trim().parse::<u8>() {
+                Ok(v) => Ok(v),
+                Err(e) => {
+                    warn!(
+                        "Invalid u8 value for {}: '{}' ({}), using default: {}",
+                        var_name, val, e, default
+                    );
+                    Ok(default)
+                }
+            },
             Err(_) => Ok(default),
         }
     }

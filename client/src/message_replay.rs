@@ -1,6 +1,9 @@
 use lazy_static::lazy_static;
 use std::collections::HashMap;
 use std::sync::Mutex;
+use tracing::debug;
+
+use crate::config::ClientConfig;
 
 /// Structure to manage replay protection using a sliding window approach
 /// This is used to prevent replay attacks by tracking received message sequence numbers
@@ -104,14 +107,20 @@ lazy_static! {
 /// Check if we've seen this message before (replay protection)
 /// Returns true if the message is a replay, false if it's new
 pub fn is_message_replay(server_address: &str, seq_num: u64) -> bool {
+    // Get the configured window size or use default if config access fails
+    let window_size = get_replay_protection_window_size();
+
     match REPLAY_PROTECTION.lock() {
         Ok(mut protection) => {
             // Get or create the replay protection window for this server
             let window = protection
                 .entry(server_address.to_string())
                 .or_insert_with(|| {
-                    // Window size of 64 means we track the last 64 sequence numbers
-                    ReplayProtectionWindow::new(64)
+                    debug!(
+                        "Creating replay protection window with size: {}",
+                        window_size
+                    );
+                    ReplayProtectionWindow::new(window_size)
                 });
 
             // Check and update the window
@@ -121,6 +130,26 @@ pub fn is_message_replay(server_address: &str, seq_num: u64) -> bool {
             tracing::error!("Warning: Failed to access replay protection data: {}", e);
             // In case of mutex poisoning, err on the side of caution and allow the message
             false
+        }
+    }
+}
+
+/// Get the configured replay protection window size
+/// Returns the window size from config, or default 64 if config can't be loaded
+fn get_replay_protection_window_size() -> u8 {
+    // Default window size if we can't access the config
+    const DEFAULT_WINDOW_SIZE: u8 = 64;
+
+    // Try to load the client configuration
+    match ClientConfig::load() {
+        Ok(config) => config.replay_protection_window_size,
+        Err(e) => {
+            tracing::warn!(
+                "Failed to load config for replay protection window size: {}",
+                e
+            );
+            tracing::warn!("Using default window size of {}", DEFAULT_WINDOW_SIZE);
+            DEFAULT_WINDOW_SIZE
         }
     }
 }

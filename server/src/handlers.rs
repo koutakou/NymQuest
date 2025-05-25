@@ -229,13 +229,19 @@ lazy_static::lazy_static! {
 
 // Check if we've seen this message before (replay protection)
 fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
+    // Get the configured window size or use default if config access fails
+    let window_size = get_replay_protection_window_size();
+
     let tag_str = tag.to_string();
     match REPLAY_PROTECTION.lock() {
         Ok(mut protection) => {
             // Get or create the replay protection window for this client
             let window = protection.entry(tag_str).or_insert_with(|| {
-                // Window size of 64 means we track the last 64 sequence numbers
-                ReplayProtectionWindow::new(64)
+                debug!(
+                    "Creating replay protection window with size: {}",
+                    window_size
+                );
+                ReplayProtectionWindow::new(window_size)
             });
 
             // Check and update the window
@@ -245,6 +251,26 @@ fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
             error!("Warning: Failed to access replay protection data: {}", e);
             // In case of mutex poisoning, err on the side of caution and allow the message
             false
+        }
+    }
+}
+
+/// Get the configured replay protection window size
+/// Returns the window size from config, or default 64 if config can't be loaded
+fn get_replay_protection_window_size() -> u8 {
+    // Default window size if we can't access the config
+    const DEFAULT_WINDOW_SIZE: u8 = 64;
+
+    // Try to load the game configuration
+    match crate::config::GameConfig::load() {
+        Ok(config) => config.replay_protection_window_size,
+        Err(e) => {
+            warn!(
+                "Failed to load config for replay protection window size: {}",
+                e
+            );
+            warn!("Using default window size of {}", DEFAULT_WINDOW_SIZE);
+            DEFAULT_WINDOW_SIZE
         }
     }
 }

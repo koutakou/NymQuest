@@ -34,6 +34,8 @@ pub struct ClientConfig {
     pub message_pacing_interval_ms: u64,
     /// Enable message pacing for enhanced privacy (adds jitter to prevent timing analysis)
     pub enable_message_pacing: bool,
+    /// Replay protection window size (number of sequence numbers to track for replay prevention)
+    pub replay_protection_window_size: u8,
 }
 
 impl Default for ClientConfig {
@@ -53,6 +55,7 @@ impl Default for ClientConfig {
             movement_speed: 14.0, // Same as server default
             message_pacing_interval_ms: 100,
             enable_message_pacing: false,
+            replay_protection_window_size: 64, // Default window size for tracking sequence numbers
         }
     }
 }
@@ -107,6 +110,10 @@ impl ClientConfig {
             "NYMQUEST_CLIENT_ENABLE_MESSAGE_PACING",
             config.enable_message_pacing,
         )?;
+        config.replay_protection_window_size = Self::load_env_u8(
+            "NYMQUEST_CLIENT_REPLAY_PROTECTION_WINDOW_SIZE",
+            config.replay_protection_window_size,
+        )?;
 
         // Validate configuration
         config.validate()?;
@@ -134,6 +141,10 @@ impl ClientConfig {
             config.message_pacing_interval_ms
         );
         info!("Enable message pacing: {}", config.enable_message_pacing);
+        info!(
+            "Replay protection window size: {}",
+            config.replay_protection_window_size
+        );
 
         Ok(config)
     }
@@ -195,6 +206,14 @@ impl ClientConfig {
         // Validate FPS
         if self.max_fps == 0 || self.max_fps > 144 {
             return Err(anyhow!("Invalid max FPS: {} (must be 1-144)", self.max_fps));
+        }
+
+        // Validate replay protection window size
+        if self.replay_protection_window_size < 16 || self.replay_protection_window_size > 128 {
+            return Err(anyhow!(
+                "Invalid replay protection window size: {} (must be 16-128)",
+                self.replay_protection_window_size
+            ));
         }
 
         if self.max_fps > 60 {
@@ -358,14 +377,36 @@ impl ClientConfig {
 
     fn load_env_bool(var_name: &str, default: bool) -> Result<bool> {
         match env::var(var_name) {
-            Ok(val) => match val.to_lowercase().as_str() {
-                "true" | "1" | "yes" | "on" => Ok(true),
-                "false" | "0" | "no" | "off" => Ok(false),
-                _ => Err(anyhow!(
-                    "Invalid boolean value for {}: {} (use true/false, 1/0, yes/no, on/off)",
-                    var_name,
-                    val
-                )),
+            Ok(val) => {
+                let trimmed = val.trim().to_lowercase();
+                match trimmed.as_str() {
+                    "true" | "1" | "yes" | "on" => Ok(true),
+                    "false" | "0" | "no" | "off" => Ok(false),
+                    _ => {
+                        warn!(
+                            "Invalid boolean value for {}: '{}', using default: {}",
+                            var_name, val, default
+                        );
+                        Ok(default)
+                    }
+                }
+            }
+            Err(_) => Ok(default),
+        }
+    }
+
+    /// Load a u8 value from an environment variable
+    fn load_env_u8(var_name: &str, default: u8) -> Result<u8> {
+        match env::var(var_name) {
+            Ok(val) => match val.trim().parse::<u8>() {
+                Ok(v) => Ok(v),
+                Err(e) => {
+                    warn!(
+                        "Invalid u8 value for {}: '{}' ({}), using default: {}",
+                        var_name, val, e, default
+                    );
+                    Ok(default)
+                }
             },
             Err(_) => Ok(default),
         }
