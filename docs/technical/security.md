@@ -74,6 +74,7 @@ The game includes configurable message pacing to enhance privacy by preventing t
 - **Processing delays**: Introduces controlled intervals between processing messages
 - **Pattern disruption**: Further obfuscates timing patterns at the server level
 - **Configurable intervals**: Default 100ms, configurable between 1-10000ms
+- **Enabled by default**: Server-side pacing is now enabled by default for comprehensive protection
 
 ### Privacy Benefits
 - **Timing correlation resistance**: Controlled delays prevent attackers from correlating messages by timing

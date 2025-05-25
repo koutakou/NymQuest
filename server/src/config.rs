@@ -117,7 +117,7 @@ impl Default for GameConfig {
             message_rate_limit: 10.0,
             message_burst_size: 20,
             message_processing_interval_ms: 100,
-            enable_message_processing_pacing: false,
+            enable_message_processing_pacing: true,
             state_broadcast_interval_seconds: 5,
             inactive_player_cleanup_interval_seconds: 45,
             replay_protection_window_size: 64, // Default window size for replay protection

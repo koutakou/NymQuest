@@ -36,7 +36,7 @@ export NYMQUEST_CLIENT_MESSAGE_PACING_MAX_JITTER_MS=150
 ## Server-Side Implementation
 
 ### Configuration Options
-- **enable_message_processing_pacing**: Boolean flag to enable/disable server-side pacing (default: false)
+- **enable_message_processing_pacing**: Boolean flag to enable/disable server-side pacing (default: true)
 - **message_processing_interval_ms**: Milliseconds between processing messages (default: 100ms, valid range: 1-10000ms)
 
 ### Implementation Details
@@ -67,7 +67,7 @@ The message pacing system provides several important privacy benefits:
 
 ## Performance Considerations
 
-- **Default Settings**: Both client and server pacing are disabled by default to maintain game responsiveness
+- **Default Settings**: Both client and server pacing are enabled by default to provide comprehensive privacy protection
 - **Recommended Usage**: Enable pacing when enhanced privacy is needed or when playing in potentially hostile network environments
 - **Latency Impact**: Higher pacing intervals increase overall latency and may impact game responsiveness
 - **Balanced Configuration**: The default 100ms interval provides a good balance between privacy and usability
