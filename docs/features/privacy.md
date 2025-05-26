@@ -26,6 +26,8 @@ A key privacy enhancement is the configurable message pacing system that was imp
 - **Server-side Message Processing Pacing**:
   - Introduces controlled delays between message processing
   - Configurable interval (default: 100ms)
+  - Configurable jitter percentage (default: 25%)
+  - Adds randomized timing variation to further prevent timing correlation attacks
   - Can be enabled/disabled via environment variables
 
 - **Privacy Benefits**:
@@ -66,11 +68,14 @@ export NYMQUEST_CLIENT_MESSAGE_PACING_INTERVAL_MS=100
 
 **Server Configuration:**
 ```bash
-# Enable message processing pacing for privacy protection (default: false)
+# Enable message processing pacing for privacy protection (default: true)
 export NYMQUEST_ENABLE_MESSAGE_PROCESSING_PACING=true
 
 # Minimum interval between processing messages in milliseconds (default: 100ms)
 export NYMQUEST_MESSAGE_PROCESSING_INTERVAL_MS=100
+
+# Jitter percentage to apply to message processing (0-100) (default: 25)
+export NYMQUEST_MESSAGE_PROCESSING_JITTER_PERCENT=25
 ```
 
 By default, message pacing is disabled to maintain game responsiveness but can be enabled when enhanced privacy is required.

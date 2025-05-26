@@ -6,7 +6,7 @@ use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
@@ -128,6 +128,46 @@ static SERVER_SEQ_NUM: AtomicU64 = AtomicU64::new(1);
 // Thread-safe function to get the next server sequence number
 fn next_seq_num() -> u64 {
     SERVER_SEQ_NUM.fetch_add(1, Ordering::SeqCst)
+}
+
+/// Calculate maximum jitter in milliseconds based on base interval and jitter percentage
+/// This enhances privacy by making message processing timing less predictable
+fn calculate_max_jitter(base_interval_ms: u64, jitter_percent: u8) -> u64 {
+    if jitter_percent == 0 {
+        return 0;
+    }
+
+    // Cap jitter percentage at 100% for safety
+    let capped_percent = jitter_percent.min(100) as u64;
+
+    // Calculate jitter as percentage of base interval
+    // Formula: (base_interval * jitter_percent) / 100
+    (base_interval_ms * capped_percent) / 100
+}
+
+/// Apply message processing pacing with jitter to enhance privacy by preventing timing correlation attacks
+/// Returns the applied jitter in milliseconds
+pub async fn apply_message_processing_jitter(base_interval_ms: u64, jitter_percent: u8) -> u64 {
+    // If no base interval is set, return immediately
+    if base_interval_ms == 0 {
+        return 0;
+    }
+
+    // Calculate jitter to add randomness to timing (prevents timing analysis)
+    let mut rng = rand::thread_rng();
+    let max_jitter = calculate_max_jitter(base_interval_ms, jitter_percent);
+    let jitter_ms = rng.gen_range(0..=max_jitter);
+
+    // Apply the calculated delay with jitter
+    let delay_duration = Duration::from_millis(jitter_ms);
+    trace!(
+        "Applying message processing jitter, waiting {}ms",
+        jitter_ms
+    );
+    tokio::time::sleep(delay_duration).await;
+
+    // Return the amount of jitter applied for logging/monitoring
+    jitter_ms
 }
 
 // Structure to manage replay protection using a sliding window approach

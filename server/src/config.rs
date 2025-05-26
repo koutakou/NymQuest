@@ -33,6 +33,7 @@ use tracing::{info, warn};
 /// - NYMQUEST_STATE_BROADCAST_INTERVAL_SECONDS: Interval for broadcasting game state (default: 5)
 /// - NYMQUEST_INACTIVE_PLAYER_CLEANUP_INTERVAL_SECONDS: Interval for cleaning up inactive players (default: 45)
 /// - NYMQUEST_REPLAY_PROTECTION_WINDOW_SIZE: Number of sequence numbers to track for replay prevention (default: 64)
+/// - NYMQUEST_MESSAGE_PROCESSING_JITTER_PERCENT: Jitter percentage to apply to message processing pacing (0-100) (default: 25)
 #[derive(Debug, Clone)]
 pub struct GameConfig {
     /// Maximum X coordinate boundary for the game world
@@ -89,6 +90,8 @@ pub struct GameConfig {
     pub inactive_player_cleanup_interval_seconds: u64,
     /// Replay protection window size (number of sequence numbers to track for replay prevention)
     pub replay_protection_window_size: u8,
+    /// Jitter percentage to apply to message processing pacing (0-100)
+    pub message_processing_jitter_percent: u8,
 }
 
 impl Default for GameConfig {
@@ -121,6 +124,7 @@ impl Default for GameConfig {
             state_broadcast_interval_seconds: 5,
             inactive_player_cleanup_interval_seconds: 45,
             replay_protection_window_size: 64, // Default window size for replay protection
+            message_processing_jitter_percent: 25, // Default 25% jitter for privacy protection
         }
     }
 }
@@ -204,6 +208,10 @@ impl GameConfig {
         config.replay_protection_window_size = Self::load_env_u8(
             "NYMQUEST_REPLAY_PROTECTION_WINDOW_SIZE",
             config.replay_protection_window_size,
+        )?;
+        config.message_processing_jitter_percent = Self::load_env_u8(
+            "NYMQUEST_MESSAGE_PROCESSING_JITTER_PERCENT",
+            config.message_processing_jitter_percent,
         )?;
 
         // Validate rate limiting settings

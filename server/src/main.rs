@@ -378,19 +378,65 @@ async fn process_incoming_message(
 ) -> Result<()> {
     let message_content = received_message.into();
 
-    // Apply message processing pacing for privacy protection (prevent timing correlation attacks)
+    // Apply message processing pacing with jitter for enhanced privacy protection
     if game_config.enable_message_processing_pacing {
         if let Some(last_processed) = *last_message_processed {
             let elapsed = last_processed.elapsed();
             let min_interval = Duration::from_millis(game_config.message_processing_interval_ms);
 
             if elapsed < min_interval {
-                let wait_time = min_interval - elapsed;
+                let base_wait_time = min_interval - elapsed;
                 debug!(
-                    "Applying message processing pacing: waiting {:?} for privacy protection",
-                    wait_time
+                    "Applying message processing pacing: base wait time {:?} for privacy protection",
+                    base_wait_time
                 );
-                tokio::time::sleep(wait_time).await;
+
+                // First apply the base waiting time to ensure minimum interval
+                tokio::time::sleep(base_wait_time).await;
+
+                // Then apply additional jitter for enhanced privacy
+                let jitter_ms = handlers::apply_message_processing_jitter(
+                    game_config.message_processing_interval_ms,
+                    game_config.message_processing_jitter_percent,
+                )
+                .await;
+
+                if jitter_ms > 0 {
+                    debug!(
+                        "Applied additional jitter of {}ms for enhanced privacy protection",
+                        jitter_ms
+                    );
+                }
+            } else {
+                // Even if we're past the minimum interval, still apply some jitter
+                // for better privacy (but with a smaller base interval)
+                let base_interval_ms = game_config.message_processing_interval_ms / 4;
+                let jitter_ms = handlers::apply_message_processing_jitter(
+                    base_interval_ms,
+                    game_config.message_processing_jitter_percent,
+                )
+                .await;
+
+                if jitter_ms > 0 {
+                    debug!(
+                        "Applied minimal jitter of {}ms for privacy protection",
+                        jitter_ms
+                    );
+                }
+            }
+        } else {
+            // For the first message, apply a small random delay
+            let jitter_ms = handlers::apply_message_processing_jitter(
+                game_config.message_processing_interval_ms / 4,
+                game_config.message_processing_jitter_percent,
+            )
+            .await;
+
+            if jitter_ms > 0 {
+                debug!(
+                    "Applied initial jitter of {}ms for privacy protection",
+                    jitter_ms
+                );
             }
         }
         *last_message_processed = Some(Instant::now());
