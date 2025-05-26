@@ -529,11 +529,14 @@ async fn send_ack(
         original_type: msg_type,
     };
 
-    // Create an authenticated acknowledgment message
-    let authenticated_ack = AuthenticatedMessage::new(ack, auth_key)?;
+    // Create an authenticated acknowledgment message with expiration
+    // Short expiration time as acknowledgments are only relevant for a short period
+    let message_ttl = 30; // 30 seconds
+    let authenticated_ack = AuthenticatedMessage::new_with_expiration(ack, auth_key, message_ttl)?;
+
+    let ack_json = serde_json::to_string(&authenticated_ack)?;
 
     // Serialize and send the authenticated acknowledgment
-    let ack_json = serde_json::to_string(&authenticated_ack)?;
     client.send_reply(sender_tag.clone(), ack_json).await?;
 
     Ok(())
@@ -594,8 +597,12 @@ pub async fn broadcast_game_state(
         seq_num: next_seq_num(),
     };
 
-    // Create an authenticated message with HMAC
-    let authenticated_message = AuthenticatedMessage::new(game_state_message, auth_key)?;
+    // Create an authenticated message with HMAC and expiration
+    // Default to a reasonable expiration time (5 minutes) for game state messages
+    let message_ttl = 300; // 5 minutes
+    let authenticated_message =
+        AuthenticatedMessage::new_with_expiration(game_state_message, auth_key, message_ttl)?;
+
     let serialized = serde_json::to_string(&authenticated_message)?;
 
     // Get a copy of all active connections
@@ -810,7 +817,12 @@ pub async fn handle_client_message(
                 negotiated_version,
             };
 
-            let authenticated_ack = AuthenticatedMessage::new(register_ack, auth_key)?;
+            // Create an authenticated message with expiration
+            // Higher timeout (10 minutes) for registration acks since they're critical for initial connection
+            let message_ttl = 600; // 10 minutes
+            let authenticated_ack =
+                AuthenticatedMessage::new_with_expiration(register_ack, auth_key, message_ttl)?;
+
             let register_ack_json = serde_json::to_string(&authenticated_ack)?;
 
             // Send the registration confirmation to the new player
@@ -981,7 +993,12 @@ async fn handle_whisper(
         seq_num: next_seq_num(),
     };
 
-    let authenticated_whisper = AuthenticatedMessage::new(whisper_msg, auth_key)?;
+    // Create an authenticated message with expiration
+    // Short expiration time as whispers are only relevant for a short period
+    let message_ttl = 300; // 5 minutes
+    let authenticated_whisper =
+        AuthenticatedMessage::new_with_expiration(whisper_msg, auth_key, message_ttl)?;
+
     let whisper_json = serde_json::to_string(&authenticated_whisper)?;
     client.send_reply(target_tag, whisper_json).await?;
 
@@ -1056,8 +1073,15 @@ async fn handle_move(
                         seq_num: next_seq_num(),
                     };
 
-                    // Create an authenticated message
-                    let authenticated_confirm = AuthenticatedMessage::new(move_confirm, auth_key)?;
+                    // Create an authenticated message with expiration
+                    // Short expiration time as movement confirmations are only relevant for a short period
+                    let message_ttl = 30; // 30 seconds
+                    let authenticated_confirm = AuthenticatedMessage::new_with_expiration(
+                        move_confirm,
+                        auth_key,
+                        message_ttl,
+                    )?;
+
                     let confirm_msg = serde_json::to_string(&authenticated_confirm)?;
                     client.send_reply(sender_tag.clone(), confirm_msg).await?;
 
@@ -1072,8 +1096,12 @@ async fn handle_move(
                     seq_num: next_seq_num(),
                 };
 
-                // Create an authenticated message
-                let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+                // Create an authenticated message with expiration
+                // Short expiration time as error messages are only relevant for a short period
+                let message_ttl = 30; // 30 seconds
+                let authenticated_error =
+                    AuthenticatedMessage::new_with_expiration(error_msg, auth_key, message_ttl)?;
+
                 let message = serde_json::to_string(&authenticated_error)?;
                 client.send_reply(sender_tag.clone(), message).await?;
             }
@@ -1084,8 +1112,12 @@ async fn handle_move(
                 seq_num: next_seq_num(),
             };
 
-            // Create an authenticated message
-            let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
+            // Create an authenticated message with expiration
+            // Short expiration time as error messages are only relevant for a short period
+            let message_ttl = 30; // 30 seconds
+            let authenticated_error =
+                AuthenticatedMessage::new_with_expiration(error_msg, auth_key, message_ttl)?;
+
             let message = serde_json::to_string(&authenticated_error)?;
             client.send_reply(sender_tag.clone(), message).await?;
         }
@@ -1266,7 +1298,17 @@ async fn handle_attack(
                 ),
                 seq_num: next_seq_num(),
             };
-            let notification_msg = serde_json::to_string(&attack_notification)?;
+
+            // Create an authenticated message with expiration
+            // Short expiration time as attack notifications are only relevant for a short period
+            let message_ttl = 30; // 30 seconds
+            let authenticated_notification = AuthenticatedMessage::new_with_expiration(
+                attack_notification,
+                auth_key,
+                message_ttl,
+            )?;
+
+            let notification_msg = serde_json::to_string(&authenticated_notification)?;
             client.send_reply(tag.clone(), notification_msg).await?;
         }
 
@@ -1293,9 +1335,15 @@ async fn handle_attack(
             seq_num: next_seq_num(),
         };
 
-        // Create an authenticated message
-        let authenticated_notification =
-            AuthenticatedMessage::new(attacker_notification, auth_key)?;
+        // Create an authenticated message with expiration
+        // Short expiration time as attack notifications are only relevant for a short period
+        let message_ttl = 30; // 30 seconds
+        let authenticated_notification = AuthenticatedMessage::new_with_expiration(
+            attacker_notification,
+            auth_key,
+            message_ttl,
+        )?;
+
         let attacker_msg = serde_json::to_string(&authenticated_notification)?;
         client.send_reply(sender_tag.clone(), attacker_msg).await?;
 
@@ -1337,8 +1385,12 @@ async fn handle_emote(
                 seq_num: next_seq_num(),
             };
 
-            // Create an authenticated chat message
-            let authenticated_chat = AuthenticatedMessage::new(chat_msg, auth_key)?;
+            // Create an authenticated chat message with expiration
+            // Short expiration time as emotes are only relevant for a short period
+            let message_ttl = 30; // 30 seconds
+            let authenticated_chat =
+                AuthenticatedMessage::new_with_expiration(chat_msg, auth_key, message_ttl)?;
+
             let serialized = serde_json::to_string(&authenticated_chat)?;
 
             // Create confirmation message for the sender
@@ -1347,8 +1399,12 @@ async fn handle_emote(
                 seq_num: next_seq_num(),
             };
 
-            // Create an authenticated confirmation message
-            let authenticated_confirm = AuthenticatedMessage::new(confirm_msg, auth_key)?;
+            // Create an authenticated confirmation message with expiration
+            // Short expiration time as emote confirmations are only relevant for a short period
+            let message_ttl = 30; // 30 seconds
+            let authenticated_confirm =
+                AuthenticatedMessage::new_with_expiration(confirm_msg, auth_key, message_ttl)?;
+
             let confirm_serialized = serde_json::to_string(&authenticated_confirm)?;
 
             // Send confirmation to the original sender
@@ -1417,8 +1473,12 @@ async fn handle_chat(
                 seq_num: next_seq_num(),
             };
 
-            // Create an authenticated chat message
-            let authenticated_chat = AuthenticatedMessage::new(chat_msg, auth_key)?;
+            // Create an authenticated chat message with expiration
+            // Short expiration time as chat messages are only relevant for a short period
+            let message_ttl = 300; // 5 minutes
+            let authenticated_chat =
+                AuthenticatedMessage::new_with_expiration(chat_msg, auth_key, message_ttl)?;
+
             let serialized = serde_json::to_string(&authenticated_chat)?;
 
             // Create confirmation message for the sender
@@ -1427,8 +1487,12 @@ async fn handle_chat(
                 seq_num: next_seq_num(),
             };
 
-            // Create an authenticated confirmation message
-            let authenticated_confirm = AuthenticatedMessage::new(confirm_msg, auth_key)?;
+            // Create an authenticated confirmation message with expiration
+            // Short expiration time as chat confirmations are only relevant for a short period
+            let message_ttl = 30; // 30 seconds
+            let authenticated_confirm =
+                AuthenticatedMessage::new_with_expiration(confirm_msg, auth_key, message_ttl)?;
+
             let confirm_serialized = serde_json::to_string(&authenticated_confirm)?;
 
             // Send confirmation to the original sender
@@ -1523,7 +1587,12 @@ pub async fn send_heartbeat_requests(
         seq_num: next_seq_num(),
     };
 
-    let authenticated_request = AuthenticatedMessage::new(heartbeat_request, auth_key)?;
+    // Create an authenticated request with expiration
+    // Short expiration time as heartbeat requests are only relevant for a short period
+    let message_ttl = 30; // 30 seconds
+    let authenticated_request =
+        AuthenticatedMessage::new_with_expiration(heartbeat_request, auth_key, message_ttl)?;
+
     let serialized = serde_json::to_string(&authenticated_request)?;
 
     debug!(

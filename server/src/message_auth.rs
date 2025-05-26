@@ -6,7 +6,8 @@ use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::fs;
 use std::path::Path;
-use tracing::info;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{info, warn};
 
 // Type alias for HMAC-SHA256
 type HmacSha256 = Hmac<Sha256>;
@@ -106,25 +107,90 @@ impl AuthKey {
     }
 }
 
-/// A wrapper for messages that includes authentication
+/// A wrapper for messages that includes authentication and expiration
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct AuthenticatedMessage<T> {
     pub message: T,
     pub auth_tag: String,
+    /// Unix timestamp (seconds since epoch) when this message expires
+    pub expires_at: Option<u64>,
 }
 
 impl<T: Serialize> AuthenticatedMessage<T> {
     /// Create a new authenticated message by generating a tag
     pub fn new(message: T, auth_key: &AuthKey) -> Result<Self> {
         let auth_tag = auth_key.generate_tag(&message)?;
-        Ok(Self { message, auth_tag })
+        Ok(Self {
+            message,
+            auth_tag,
+            expires_at: None,
+        })
     }
 
-    /// Verify that this message has not been tampered with
+    /// Create a new authenticated message with expiration
+    pub fn new_with_expiration(message: T, auth_key: &AuthKey, ttl_seconds: u64) -> Result<Self> {
+        let auth_tag = auth_key.generate_tag(&message)?;
+
+        // Calculate expiration time
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| anyhow!("Failed to get system time: {}", e))?
+            .as_secs();
+
+        let expires_at = now
+            .checked_add(ttl_seconds)
+            .ok_or_else(|| anyhow!("Overflow calculating expiration time"))?;
+
+        Ok(Self {
+            message,
+            auth_tag,
+            expires_at: Some(expires_at),
+        })
+    }
+
+    /// Verify that this message has not been tampered with and is not expired
     pub fn verify(&self, auth_key: &AuthKey) -> Result<bool>
     where
         T: Serialize + Clone,
     {
+        // First check if the message is expired
+        if let Some(expires_at) = self.expires_at {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| anyhow!("Failed to get system time: {}", e))?
+                .as_secs();
+
+            if now > expires_at {
+                warn!(
+                    "Message expired: current time {} > expiration time {}",
+                    now, expires_at
+                );
+                return Ok(false);
+            }
+        }
+
+        // Then verify the authentication tag
         auth_key.verify_tag(&self.message, &self.auth_tag)
+    }
+
+    /// Get the time remaining until expiration in seconds
+    /// Returns None if the message doesn't have an expiration time
+    #[allow(dead_code)] // This method may be used in future for debugging or metrics
+    pub fn time_to_expiration(&self) -> Result<Option<u64>> {
+        match self.expires_at {
+            Some(expires_at) => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|e| anyhow!("Failed to get system time: {}", e))?
+                    .as_secs();
+
+                if now >= expires_at {
+                    Ok(Some(0))
+                } else {
+                    Ok(Some(expires_at - now))
+                }
+            }
+            None => Ok(None),
+        }
     }
 }

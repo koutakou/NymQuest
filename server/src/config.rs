@@ -42,6 +42,7 @@ static CONFIG_LOGGED: AtomicBool = AtomicBool::new(false);
 /// - NYMQUEST_REPLAY_PROTECTION_MAX_WINDOW: Maximum window size for adaptive replay protection (default: 96)
 /// - NYMQUEST_REPLAY_PROTECTION_ADJUSTMENT_COOLDOWN: Cooldown period in seconds between window size adjustments (default: 60)
 /// - NYMQUEST_MESSAGE_PROCESSING_JITTER_PERCENT: Jitter percentage to apply to message processing pacing (0-100) (default: 25)
+/// - NYMQUEST_MESSAGE_EXPIRATION_SECONDS: Default expiration time in seconds for authenticated messages (default: 300)
 #[derive(Debug, Clone)]
 pub struct GameConfig {
     /// Maximum X coordinate boundary for the game world
@@ -108,6 +109,10 @@ pub struct GameConfig {
     pub replay_protection_adjustment_cooldown: u64,
     /// Jitter percentage to apply to message processing pacing (0-100)
     pub message_processing_jitter_percent: u8,
+
+    /// Default expiration time in seconds for authenticated messages
+    /// Messages older than this time will be rejected, preventing delayed replay attacks
+    pub message_expiration_seconds: Option<u64>,
 }
 
 impl Default for GameConfig {
@@ -136,7 +141,7 @@ impl Default for GameConfig {
             message_rate_limit: 10.0,
             message_burst_size: 20,
             message_processing_interval_ms: 100,
-            enable_message_processing_pacing: true,
+            enable_message_processing_pacing: false,
             state_broadcast_interval_seconds: 5,
             inactive_player_cleanup_interval_seconds: 45,
             replay_protection_window_size: 64, // Default window size for replay protection
@@ -145,6 +150,7 @@ impl Default for GameConfig {
             replay_protection_max_window: 96,
             replay_protection_adjustment_cooldown: 60,
             message_processing_jitter_percent: 25, // Default 25% jitter for privacy protection
+            message_expiration_seconds: Some(300), // 5 minutes by default
         }
     }
 }
@@ -249,6 +255,23 @@ impl GameConfig {
             "NYMQUEST_MESSAGE_PROCESSING_JITTER_PERCENT",
             config.message_processing_jitter_percent,
         )?;
+
+        // Default expiration time for authenticated messages (in seconds)
+        // Use None to disable message expiration
+        let message_expiration_seconds = match env::var("NYMQUEST_MESSAGE_EXPIRATION_SECONDS") {
+            Ok(val) => match val.parse::<u64>() {
+                Ok(seconds) => Some(seconds),
+                Err(e) => {
+                    warn!(
+                        "Invalid message expiration seconds value: {} ({}), using default",
+                        val, e
+                    );
+                    Some(300) // Default to 5 minutes
+                }
+            },
+            Err(_) => Some(300), // Default to 5 minutes if not set
+        };
+        config.message_expiration_seconds = message_expiration_seconds;
 
         // Validate rate limiting settings
         if config.message_rate_limit <= 0.0 {

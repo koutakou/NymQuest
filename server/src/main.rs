@@ -23,8 +23,7 @@ use futures::StreamExt;
 use nym_sdk::mixnet::{AnonymousSenderTag, MixnetClient, MixnetClientBuilder, StoragePaths};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
-use std::time::Instant;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
@@ -468,13 +467,14 @@ async fn process_incoming_message(
             // Try to deserialize as an authenticated message
             match serde_json::from_str::<AuthenticatedMessage<ClientMessage>>(&content) {
                 Ok(authenticated_message) => {
-                    // Verify message authenticity
+                    // Verify message authenticity and check expiration
                     match authenticated_message.verify(auth_key) {
                         Ok(true) => {
-                            // Message is authentic, extract the actual client message
+                            // Message is authentic and not expired, extract the actual client message
                             let client_message = authenticated_message.message;
                             debug!(
                                 message_type = ?client_message,
+                                expiration = ?authenticated_message.expires_at,
                                 "Processing authenticated client message"
                             );
 
@@ -494,9 +494,21 @@ async fn process_incoming_message(
                             }
                         }
                         Ok(false) => {
-                            warn!(
-                                "Received message with invalid authentication - possible security threat"
-                            );
+                            // This could be due to invalid authentication OR message expiration
+                            if let Some(expires_at) = authenticated_message.expires_at {
+                                let now = SystemTime::now()
+                                    .duration_since(UNIX_EPOCH)
+                                    .unwrap_or_default()
+                                    .as_secs();
+
+                                if now > expires_at {
+                                    warn!("Rejected expired message (expired at {})", expires_at);
+                                } else {
+                                    warn!("Received message with invalid authentication - possible security threat");
+                                }
+                            } else {
+                                warn!("Received message with invalid authentication - possible security threat");
+                            }
                         }
                         Err(e) => {
                             error!(

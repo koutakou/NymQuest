@@ -80,6 +80,16 @@ The status panel shows important information about your connection:
 - **Privacy Protection**: Indicates your current anonymity status (Fully Protected, Protected, Degraded, Compromised)
 - **Network Statistics**: Shows metrics like latency and message delivery success rates
 
+## Security Features
+
+NymQuest incorporates several security mechanisms to protect your gameplay experience:
+
+- **Message Authentication**: All communications are authenticated using HMAC-SHA256, preventing message tampering
+- **Message Expiration**: Messages automatically expire after a set time period (varies by message type), preventing delayed replay attacks
+- **Replay Protection**: A sliding window approach prevents message replay attacks within the active time window
+- **Message Pacing**: Communication timing is randomized to prevent timing correlation attacks
+- **Privacy-Preserving IDs**: Players are identified by display IDs rather than actual usernames to other players
+
 ## Tips for Playing
 
 - Keep an eye on your connection health status
