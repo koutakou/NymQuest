@@ -1,7 +1,11 @@
 use anyhow::{anyhow, Result};
 use std::env;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
+
+// Static flag to track whether detailed configuration has been logged already
+static CONFIG_LOGGED: AtomicBool = AtomicBool::new(false);
 
 /// Game configuration constants with validation and environment override support
 ///
@@ -260,32 +264,43 @@ impl GameConfig {
             ));
         }
 
-        info!(
-            "Rate limiting: {:.1} msg/sec, burst: {}",
-            config.message_rate_limit, config.message_burst_size
-        );
-
         // Validate configuration
         config.validate()?;
 
-        info!("Game configuration loaded and validated");
-        info!(
-            "World boundaries: ({}, {}) to ({}, {})",
-            config.world_min_x, config.world_min_y, config.world_max_x, config.world_max_y
-        );
-        info!("Movement speed: {}", config.movement_speed);
-        info!(
-            "Heartbeat: {}s interval, {}s timeout",
-            config.heartbeat_interval_seconds, config.heartbeat_timeout_seconds
-        );
-        info!(
-            "Max players: {}, Max name length: {}, Max chat length: {}",
-            config.max_players, config.max_player_name_length, config.max_chat_message_length
-        );
-        info!(
-            "Replay protection window size: {}",
-            config.replay_protection_window_size
-        );
+        // Check if we've already logged the configuration details
+        let config_already_logged = CONFIG_LOGGED.load(Ordering::SeqCst);
+
+        if !config_already_logged {
+            // Log detailed configuration only the first time
+            info!("Game configuration loaded and validated");
+            info!(
+                "Rate limiting: {:.1} msg/sec, burst: {}",
+                config.message_rate_limit, config.message_burst_size
+            );
+            info!(
+                "World boundaries: ({}, {}) to ({}, {})",
+                config.world_min_x, config.world_min_y, config.world_max_x, config.world_max_y
+            );
+            info!("Movement speed: {}", config.movement_speed);
+            info!(
+                "Heartbeat: {}s interval, {}s timeout",
+                config.heartbeat_interval_seconds, config.heartbeat_timeout_seconds
+            );
+            info!(
+                "Max players: {}, Max name length: {}, Max chat length: {}",
+                config.max_players, config.max_player_name_length, config.max_chat_message_length
+            );
+            info!(
+                "Replay protection window size: {}",
+                config.replay_protection_window_size
+            );
+
+            // Mark as logged to avoid redundancy
+            CONFIG_LOGGED.store(true, Ordering::SeqCst);
+        } else {
+            // Just log a brief message for subsequent loads
+            debug!("Game configuration reloaded");
+        }
 
         Ok(config)
     }
