@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.3] - 2025-05-26
+
+### Added
+- Message prioritization system that enhances privacy protection against timing correlation attacks
+- Variable jitter based on message type sensitivity (Critical, High, Medium, Low priority levels)
+- Improved privacy protection during high server load situations
+- Updated privacy documentation with details on the new prioritization system
+
+### Improved
+- Optimized server logging to reduce redundancy
+- Eliminated duplicate configuration log entries
+- Enhanced log readability by removing repetitive information
+
 ## [0.1.2] - 2025-05-25
 
 ### Fixed
