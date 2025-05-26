@@ -33,6 +33,10 @@ use tracing::{info, warn};
 /// - NYMQUEST_STATE_BROADCAST_INTERVAL_SECONDS: Interval for broadcasting game state (default: 5)
 /// - NYMQUEST_INACTIVE_PLAYER_CLEANUP_INTERVAL_SECONDS: Interval for cleaning up inactive players (default: 45)
 /// - NYMQUEST_REPLAY_PROTECTION_WINDOW_SIZE: Number of sequence numbers to track for replay prevention (default: 64)
+/// - NYMQUEST_REPLAY_PROTECTION_ADAPTIVE: Enable adaptive replay protection window sizing (default: true)
+/// - NYMQUEST_REPLAY_PROTECTION_MIN_WINDOW: Minimum window size for adaptive replay protection (default: 32)
+/// - NYMQUEST_REPLAY_PROTECTION_MAX_WINDOW: Maximum window size for adaptive replay protection (default: 96)
+/// - NYMQUEST_REPLAY_PROTECTION_ADJUSTMENT_COOLDOWN: Cooldown period in seconds between window size adjustments (default: 60)
 /// - NYMQUEST_MESSAGE_PROCESSING_JITTER_PERCENT: Jitter percentage to apply to message processing pacing (0-100) (default: 25)
 #[derive(Debug, Clone)]
 pub struct GameConfig {
@@ -90,6 +94,14 @@ pub struct GameConfig {
     pub inactive_player_cleanup_interval_seconds: u64,
     /// Replay protection window size (number of sequence numbers to track for replay prevention)
     pub replay_protection_window_size: u8,
+    /// Enable adaptive replay protection window sizing
+    pub replay_protection_adaptive: bool,
+    /// Minimum window size for adaptive replay protection
+    pub replay_protection_min_window: u8,
+    /// Maximum window size for adaptive replay protection
+    pub replay_protection_max_window: u8,
+    /// Cooldown period in seconds between window size adjustments
+    pub replay_protection_adjustment_cooldown: u64,
     /// Jitter percentage to apply to message processing pacing (0-100)
     pub message_processing_jitter_percent: u8,
 }
@@ -124,6 +136,10 @@ impl Default for GameConfig {
             state_broadcast_interval_seconds: 5,
             inactive_player_cleanup_interval_seconds: 45,
             replay_protection_window_size: 64, // Default window size for replay protection
+            replay_protection_adaptive: true,
+            replay_protection_min_window: 32,
+            replay_protection_max_window: 96,
+            replay_protection_adjustment_cooldown: 60,
             message_processing_jitter_percent: 25, // Default 25% jitter for privacy protection
         }
     }
@@ -208,6 +224,22 @@ impl GameConfig {
         config.replay_protection_window_size = Self::load_env_u8(
             "NYMQUEST_REPLAY_PROTECTION_WINDOW_SIZE",
             config.replay_protection_window_size,
+        )?;
+        config.replay_protection_adaptive = Self::load_env_bool(
+            "NYMQUEST_REPLAY_PROTECTION_ADAPTIVE",
+            config.replay_protection_adaptive,
+        )?;
+        config.replay_protection_min_window = Self::load_env_u8(
+            "NYMQUEST_REPLAY_PROTECTION_MIN_WINDOW",
+            config.replay_protection_min_window,
+        )?;
+        config.replay_protection_max_window = Self::load_env_u8(
+            "NYMQUEST_REPLAY_PROTECTION_MAX_WINDOW",
+            config.replay_protection_max_window,
+        )?;
+        config.replay_protection_adjustment_cooldown = Self::load_env_u64(
+            "NYMQUEST_REPLAY_PROTECTION_ADJUSTMENT_COOLDOWN",
+            config.replay_protection_adjustment_cooldown,
         )?;
         config.message_processing_jitter_percent = Self::load_env_u8(
             "NYMQUEST_MESSAGE_PROCESSING_JITTER_PERCENT",

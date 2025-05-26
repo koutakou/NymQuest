@@ -38,7 +38,12 @@ A key privacy enhancement is the configurable message pacing system that was imp
 ## Security Measures
 
 - **Message Authentication**: All messages are cryptographically authenticated using HMAC-SHA256 to prevent tampering
-- **Replay Protection**: Messages are verified with sequence numbers and authentication tags to prevent replay attacks
+- **Adaptive Replay Protection**: 
+  - Messages are verified with sequence numbers and authentication tags to prevent replay attacks
+  - Dynamic window sizing that automatically adjusts based on network conditions
+  - Larger windows for networks with high out-of-order message rates
+  - Smaller windows for optimal performance on reliable networks
+  - Privacy-preserving adaptation based on connection patterns, not user identity
 - **Session Integrity Protection**: Prevents identity conflicts by requiring clients to disconnect before registering again
 
 ## Privacy-Preserving Rate Limiting
@@ -76,6 +81,21 @@ export NYMQUEST_MESSAGE_PROCESSING_INTERVAL_MS=100
 
 # Jitter percentage to apply to message processing (0-100) (default: 25)
 export NYMQUEST_MESSAGE_PROCESSING_JITTER_PERCENT=25
+
+# Replay protection window size (default: 64)
+export NYMQUEST_REPLAY_PROTECTION_WINDOW_SIZE=64
+
+# Enable adaptive replay protection window sizing (default: true)
+export NYMQUEST_REPLAY_PROTECTION_ADAPTIVE=true
+
+# Minimum window size for adaptive replay protection (default: 32)
+export NYMQUEST_REPLAY_PROTECTION_MIN_WINDOW=32
+
+# Maximum window size for adaptive replay protection (default: 96)
+export NYMQUEST_REPLAY_PROTECTION_MAX_WINDOW=96
+
+# Cooldown period in seconds between window size adjustments (default: 60)
+export NYMQUEST_REPLAY_PROTECTION_ADJUSTMENT_COOLDOWN=60
 ```
 
 By default, message pacing is disabled to maintain game responsiveness but can be enabled when enhanced privacy is required.

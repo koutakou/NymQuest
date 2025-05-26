@@ -179,23 +179,106 @@ struct ReplayProtectionWindow {
     window: u128,
     // Window size - how many previous sequence numbers we track
     window_size: u8,
+    // Base window size (from configuration)
+    base_window_size: u8,
+    // Maximum window size (to limit memory usage)
+    max_window_size: u8,
+    // Minimum window size (to ensure sufficient security)
+    min_window_size: u8,
+    // Count of out-of-order messages received
+    out_of_order_count: u32,
+    // Total messages processed (for calculating adaptation rate)
+    total_messages: u32,
+    // Last time window size was adjusted
+    last_adjustment: SystemTime,
+    // Cooldown period between adjustments (in seconds)
+    adjustment_cooldown: u64,
 }
 
 impl ReplayProtectionWindow {
-    // Create a new replay protection window
+    // Create a new replay protection window with adaptive sizing capability
     fn new(window_size: u8) -> Self {
-        // window_size should be at most 128 (size of u128 in bits)
-        let window_size = std::cmp::min(window_size, 128);
-        ReplayProtectionWindow {
+        // Set reasonable bounds for window size adaptation
+        let min_size = std::cmp::max(16, window_size / 2);
+        let max_size = std::cmp::min(127, window_size * 2);
+
+        Self {
             highest_seq: 0,
             window: 0,
             window_size,
+            base_window_size: window_size,
+            max_window_size: max_size,
+            min_window_size: min_size,
+            out_of_order_count: 0,
+            total_messages: 0,
+            last_adjustment: SystemTime::now(),
+            adjustment_cooldown: 60, // Default 60 second cooldown between adjustments
         }
+    }
+
+    // Adjust window size based on network conditions
+    fn adjust_window_size(&mut self) {
+        // Check if we're in cooldown period
+        if let Ok(elapsed) = SystemTime::now().duration_since(self.last_adjustment) {
+            if elapsed.as_secs() < self.adjustment_cooldown {
+                return;
+            }
+        } else {
+            return; // Error in time calculation, skip adjustment
+        }
+
+        // Require minimum number of messages before adjusting
+        if self.total_messages < 20 {
+            return;
+        }
+
+        // Calculate out-of-order ratio (percentage of out-of-order messages)
+        let out_of_order_ratio = if self.total_messages > 0 {
+            self.out_of_order_count as f32 / self.total_messages as f32
+        } else {
+            0.0
+        };
+
+        // Adjust window size based on ratio
+        let new_size = if out_of_order_ratio > 0.15 {
+            // High out-of-order rate: increase window size
+            std::cmp::min(self.window_size + 8, self.max_window_size)
+        } else if out_of_order_ratio < 0.05 {
+            // Low out-of-order rate: gradually decrease window size toward base
+            if self.window_size > self.base_window_size {
+                self.window_size - 4
+            } else if self.window_size > self.min_window_size {
+                self.window_size - 2
+            } else {
+                self.window_size
+            }
+        } else {
+            // Moderate out-of-order rate: maintain current size
+            self.window_size
+        };
+
+        // Apply changes if needed
+        if new_size != self.window_size {
+            trace!(
+                "Adaptive replay protection: window size adjusted from {} to {}",
+                self.window_size,
+                new_size
+            );
+            self.window_size = new_size;
+        }
+
+        // Reset counters and update timestamp
+        self.out_of_order_count = 0;
+        self.total_messages = 0;
+        self.last_adjustment = SystemTime::now();
     }
 
     // Process a sequence number and determine if it's a replay
     // Returns true if the message is a replay, false if it's new
     fn process(&mut self, seq_num: u64) -> bool {
+        // Increment total messages counter for adaptive sizing
+        self.total_messages = self.total_messages.saturating_add(1);
+
         // Handle the very first message (when highest_seq is 0)
         if self.highest_seq == 0 {
             self.highest_seq = seq_num;
@@ -233,6 +316,11 @@ impl ReplayProtectionWindow {
             // Mark the new highest sequence number as seen (bit 0 represents highest_seq)
             self.window |= 1;
 
+            // Consider adjusting window size periodically
+            if self.total_messages % 100 == 0 {
+                self.adjust_window_size();
+            }
+
             return false; // Not a replay
         }
 
@@ -249,6 +337,9 @@ impl ReplayProtectionWindow {
             return true; // Too old, consider it a replay
         }
 
+        // This is an out-of-order message (but within window) - track for adaptive sizing
+        self.out_of_order_count = self.out_of_order_count.saturating_add(1);
+
         // Check if we've already seen this sequence number
         let mask = 1u128 << (offset as u8);
         if (self.window & mask) != 0 {
@@ -257,6 +348,11 @@ impl ReplayProtectionWindow {
 
         // Mark this sequence number as seen
         self.window |= mask;
+
+        // Consider adjusting window size periodically
+        if self.total_messages % 100 == 0 {
+            self.adjust_window_size();
+        }
 
         false // Not a replay
     }
@@ -269,48 +365,73 @@ lazy_static::lazy_static! {
 
 // Check if we've seen this message before (replay protection)
 fn is_message_replay(tag: &AnonymousSenderTag, seq_num: u64) -> bool {
-    // Get the configured window size or use default if config access fails
-    let window_size = get_replay_protection_window_size();
-
+    // Get a string representation of the sender tag for HashMap lookup
     let tag_str = tag.to_string();
-    match REPLAY_PROTECTION.lock() {
-        Ok(mut protection) => {
-            // Get or create the replay protection window for this client
-            let window = protection.entry(tag_str).or_insert_with(|| {
-                debug!(
-                    "Creating replay protection window with size: {}",
-                    window_size
-                );
-                ReplayProtectionWindow::new(window_size)
-            });
 
-            // Check and update the window
-            window.process(seq_num)
-        }
-        Err(e) => {
-            error!("Warning: Failed to access replay protection data: {}", e);
-            // In case of mutex poisoning, err on the side of caution and allow the message
-            false
-        }
+    // Try to acquire the lock on the replay protection map
+    if let Ok(mut replay_map) = REPLAY_PROTECTION.lock() {
+        // Load adaptive replay protection settings from config
+        let window_size = get_replay_protection_window_size();
+        let (adaptive, min_window, max_window, cooldown) = match crate::config::GameConfig::load() {
+            Ok(config) => (
+                config.replay_protection_adaptive,
+                config.replay_protection_min_window,
+                config.replay_protection_max_window,
+                config.replay_protection_adjustment_cooldown,
+            ),
+            Err(_) => (true, 32, 96, 60), // Default values if config can't be loaded
+        };
+
+        // Get or create a replay protection window for this sender
+        let window = replay_map.entry(tag_str).or_insert_with(|| {
+            let mut w = ReplayProtectionWindow::new(window_size);
+
+            // If adaptive mode is enabled, apply the adaptive parameters
+            if adaptive {
+                w.min_window_size = min_window;
+                w.max_window_size = max_window;
+                w.adjustment_cooldown = cooldown;
+            }
+
+            w
+        });
+
+        // Process the sequence number and check if it's a replay
+        window.process(seq_num)
+    } else {
+        // If we failed to acquire the lock, we conservatively assume it could be a replay
+        error!("Warning: Failed to access replay protection data");
+        true // Assume it's a replay to be safe
     }
 }
 
-/// Get the configured replay protection window size
+/// Get the configured replay protection window size and related settings
 /// Returns the window size from config, or default 64 if config can't be loaded
 fn get_replay_protection_window_size() -> u8 {
-    // Default window size if we can't access the config
-    const DEFAULT_WINDOW_SIZE: u8 = 64;
-
-    // Try to load the game configuration
     match crate::config::GameConfig::load() {
-        Ok(config) => config.replay_protection_window_size,
+        Ok(config) => {
+            debug!(
+                "Using configured replay protection window size: {}",
+                config.replay_protection_window_size
+            );
+
+            if config.replay_protection_adaptive {
+                debug!(
+                    "Adaptive replay protection enabled (min: {}, max: {}, cooldown: {}s)",
+                    config.replay_protection_min_window,
+                    config.replay_protection_max_window,
+                    config.replay_protection_adjustment_cooldown
+                );
+            }
+
+            config.replay_protection_window_size
+        }
         Err(e) => {
             warn!(
-                "Failed to load config for replay protection window size: {}",
+                "Failed to load config for replay protection, using default: {}",
                 e
             );
-            warn!("Using default window size of {}", DEFAULT_WINDOW_SIZE);
-            DEFAULT_WINDOW_SIZE
+            64 // Default window size if we can't load config
         }
     }
 }
