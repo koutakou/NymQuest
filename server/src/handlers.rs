@@ -18,6 +18,44 @@ use crate::game_protocol::{
 };
 use crate::game_state::GameState;
 
+/// Message priority enum for privacy-enhancing load management
+/// Different message types have different priorities to prevent
+/// timing correlation attacks during high server load
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum MessagePriority {
+    /// Highest priority: critical system messages
+    Critical = 0,
+    /// High priority: authentication and connection management
+    High = 1,
+    /// Medium priority: gameplay affecting actions
+    Medium = 2,
+    /// Low priority: non-essential social interactions
+    Low = 3,
+}
+
+/// Determine message priority based on message type
+/// This helps randomize processing time while maintaining game responsiveness
+pub fn get_message_priority(msg_type: &ClientMessageType) -> MessagePriority {
+    match msg_type {
+        // Critical system messages
+        ClientMessageType::Disconnect => MessagePriority::Critical,
+        ClientMessageType::Heartbeat => MessagePriority::High,
+        ClientMessageType::Register => MessagePriority::High,
+
+        // Gameplay affecting actions
+        ClientMessageType::Move => MessagePriority::Medium,
+        ClientMessageType::Attack => MessagePriority::Medium,
+
+        // Social interactions (lower priority)
+        ClientMessageType::Chat => MessagePriority::Low,
+        ClientMessageType::Emote => MessagePriority::Low,
+        ClientMessageType::Whisper => MessagePriority::Low,
+
+        // Acks are processed immediately
+        ClientMessageType::Ack => MessagePriority::Critical,
+    }
+}
+
 /// Token bucket rate limiter for DoS protection
 /// Tracks rate limits per connection to prevent spam while preserving privacy
 #[derive(Debug, Clone)]
@@ -147,7 +185,11 @@ fn calculate_max_jitter(base_interval_ms: u64, jitter_percent: u8) -> u64 {
 
 /// Apply message processing pacing with jitter to enhance privacy by preventing timing correlation attacks
 /// Returns the applied jitter in milliseconds
-pub async fn apply_message_processing_jitter(base_interval_ms: u64, jitter_percent: u8) -> u64 {
+pub async fn apply_message_processing_jitter(
+    base_interval_ms: u64,
+    jitter_percent: u8,
+    priority: Option<MessagePriority>,
+) -> u64 {
     // If no base interval is set, return immediately
     if base_interval_ms == 0 {
         return 0;
@@ -156,13 +198,49 @@ pub async fn apply_message_processing_jitter(base_interval_ms: u64, jitter_perce
     // Calculate jitter to add randomness to timing (prevents timing analysis)
     let mut rng = rand::thread_rng();
     let max_jitter = calculate_max_jitter(base_interval_ms, jitter_percent);
-    let jitter_ms = rng.gen_range(0..=max_jitter);
+
+    // Adjust jitter based on message priority if provided
+    // This creates a more realistic timing pattern while maintaining privacy
+    let jitter_ms = if let Some(priority) = priority {
+        match priority {
+            // Critical messages get minimal jitter (0-25% of max)
+            MessagePriority::Critical => {
+                if max_jitter > 0 {
+                    rng.gen_range(0..=max_jitter / 4)
+                } else {
+                    0
+                }
+            }
+            // High priority messages get reduced jitter (0-50% of max)
+            MessagePriority::High => {
+                if max_jitter > 0 {
+                    rng.gen_range(0..=max_jitter / 2)
+                } else {
+                    0
+                }
+            }
+            // Medium priority messages get standard jitter (0-75% of max)
+            MessagePriority::Medium => {
+                if max_jitter > 0 {
+                    rng.gen_range(0..=(max_jitter * 3 / 4))
+                } else {
+                    0
+                }
+            }
+            // Low priority messages get full jitter range (0-100% of max)
+            MessagePriority::Low => rng.gen_range(0..=max_jitter),
+        }
+    } else {
+        // If no priority specified, use full jitter range
+        rng.gen_range(0..=max_jitter)
+    };
 
     // Apply the calculated delay with jitter
     let delay_duration = Duration::from_millis(jitter_ms);
     trace!(
-        "Applying message processing jitter, waiting {}ms",
-        jitter_ms
+        "Applying message processing jitter, waiting {}ms (priority: {:?})",
+        jitter_ms,
+        priority
     );
     tokio::time::sleep(delay_duration).await;
 
@@ -616,6 +694,7 @@ pub async fn handle_client_message(
 
     // Get sequence number for replay protection and acknowledgments
     let seq_num = message.get_seq_num();
+    let msg_type = message.get_type();
 
     // Handle acknowledgments separately and directly
     if let ClientMessage::Ack { .. } = &message {
@@ -633,8 +712,39 @@ pub async fn handle_client_message(
         return Ok(());
     }
 
+    // Determine message priority for privacy-enhancing processing
+    let priority = get_message_priority(&msg_type);
+
+    // Apply priority-based jitter before processing to enhance privacy
+    // Get server configuration for message processing
+    let (processing_interval, jitter_percent) = {
+        let config = GameConfig::load().unwrap_or_default();
+        if config.enable_message_processing_pacing {
+            (
+                config.message_processing_interval_ms,
+                config.message_processing_jitter_percent,
+            )
+        } else {
+            (0, 0)
+        }
+    };
+
+    // Apply priority-based message processing jitter
+    if processing_interval > 0 {
+        let jitter_applied =
+            apply_message_processing_jitter(processing_interval, jitter_percent, Some(priority))
+                .await;
+
+        trace!(
+            "Applied {}ms jitter for {:?} message (priority: {:?})",
+            jitter_applied,
+            msg_type,
+            priority
+        );
+    }
+
     // Send acknowledgment first for all non-ack messages
-    send_ack(client, &sender_tag, seq_num, message.get_type(), auth_key).await?;
+    send_ack(client, &sender_tag, seq_num, msg_type, auth_key).await?;
 
     // Process the message based on its type
     match message {

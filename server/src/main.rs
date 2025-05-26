@@ -398,6 +398,7 @@ async fn process_incoming_message(
                 let jitter_ms = handlers::apply_message_processing_jitter(
                     game_config.message_processing_interval_ms,
                     game_config.message_processing_jitter_percent,
+                    None, // No specific message priority for this jitter
                 )
                 .await;
 
@@ -414,6 +415,7 @@ async fn process_incoming_message(
                 let jitter_ms = handlers::apply_message_processing_jitter(
                     base_interval_ms,
                     game_config.message_processing_jitter_percent,
+                    None, // No specific message priority for this jitter
                 )
                 .await;
 
@@ -429,6 +431,7 @@ async fn process_incoming_message(
             let jitter_ms = handlers::apply_message_processing_jitter(
                 game_config.message_processing_interval_ms / 4,
                 game_config.message_processing_jitter_percent,
+                None, // No specific message priority for this jitter
             )
             .await;
 

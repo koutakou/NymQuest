@@ -30,9 +30,24 @@ A key privacy enhancement is the configurable message pacing system that was imp
   - Adds randomized timing variation to further prevent timing correlation attacks
   - Can be enabled/disabled via environment variables
 
+- **Message Prioritization System**:
+  - Categorizes messages by privacy-sensitivity and gameplay importance
+  - Applies variable jitter based on message type to prevent timing correlation
+  - Four priority levels: Critical, High, Medium, and Low
+  - Creates realistic timing patterns while maintaining strong privacy protection
+  - Prevents identification of message types through timing analysis
+  - Automatically balances gameplay responsiveness with privacy protection
+
+- **Priority Categories**:
+  - **Critical**: Essential system messages (disconnects, acknowledgments)
+  - **High**: Authentication and connection management (registration, heartbeats)
+  - **Medium**: Gameplay actions (movement, combat)
+  - **Low**: Social interactions (chat, emotes, whispers)
+
 - **Privacy Benefits**:
   - **Timing Correlation Resistance**: Controlled delays prevent attackers from correlating messages by timing
   - **Traffic Analysis Protection**: Reduces patterns that could be used for traffic analysis
+  - **Load-Adaptive Privacy**: Maintains privacy guarantees even during high server load
   - **Configurable Trade-offs**: Allows balancing privacy enhancement with responsiveness
 
 ## Security Measures
