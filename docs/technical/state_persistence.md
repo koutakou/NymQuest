@@ -57,6 +57,7 @@ This process ensures that:
 - **Stale Data Cleanup**: Players offline for more than 5 minutes are automatically removed during loading
 - **Privacy Protection**: Network-sensitive information is excluded from the saved data
 - **Compatibility Checking**: Ensures saved state is compatible with current server configuration
+- **Progress Persistence**: Player experience points and levels are saved and restored across server restarts
 
 ### Storage Management
 
@@ -78,7 +79,7 @@ When the server starts:
 5. Positions are validated against current world boundaries
 6. The cleaned state is applied to the server
 
-Players need to reconnect after a server restart for network security reasons, but their game state (position, health, etc.) is preserved.
+Players need to reconnect after a server restart for network security reasons, but their game state (position, health, experience points, level, etc.) is preserved.
 
 ## Configuration
 

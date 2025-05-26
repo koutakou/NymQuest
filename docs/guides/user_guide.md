@@ -31,6 +31,22 @@ After starting the client and connecting to the server, you first need to regist
 ### Help and Information
 - Help: `/help` or `/h` or `/?`
 
+## Experience and Leveling
+
+NymQuest features a progression system that rewards combat activity:
+
+- **Gaining Experience**: You earn XP when you successfully attack other players
+- **Experience Points**: Each point of damage you deal awards 1 XP
+- **Bonus Experience**: Defeating a player (reducing their health to zero) awards 20 bonus XP
+- **Level Progression**: To reach the next level, you need (current level × 100) XP
+  - Level 2 requires 100 XP
+  - Level 3 requires 200 XP
+  - And so on
+- **Level Benefits**:
+  - Each level above 1 provides +2 damage to your attacks
+  - Each level above 1 provides +5 maximum health
+  - Your current level and XP progress are displayed in your player status panel
+
 ## User Interface Elements
 
 The game interface is divided into several sections:
@@ -43,6 +59,7 @@ The game interface is divided into several sections:
 
 ### Status Panel
 - Shows your current health
+- Displays your current level and experience points
 - Displays your position coordinates
 - Indicates your connection status and privacy level
 

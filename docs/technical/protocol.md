@@ -35,6 +35,25 @@ This system ensures that:
 - Clear compatibility feedback prevents connection issues
 - Future protocol evolution is supported from day one
 
+## Data Structures
+
+### Player Structure
+
+The Player structure contains all essential information about a player:
+
+```rust
+public struct Player {
+    pub id: String,         // Internal server ID (UUID) - not exposed to other clients
+    pub display_id: String, // Public privacy-preserving identifier (e.g. "Player1")
+    pub position: Position, // Player position in the game world
+    pub health: u32,        // Current health points
+    pub name: String,       // Player-chosen name
+    pub last_attack_time: u64, // Timestamp of the last attack (for cooldown)
+    pub experience: u32,    // Experience points earned through gameplay
+    pub level: u8,          // Player level based on experience
+}
+```
+
 ## Message Types
 
 The protocol supports the following message types:

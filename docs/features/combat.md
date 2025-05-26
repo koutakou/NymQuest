@@ -10,6 +10,8 @@ NymQuest features a simple but engaging combat system that allows players to eng
 - **Damage**: Base attack deals 10 damage points
 - **Critical Hits**: 15% chance to land a critical hit doing double damage (20 points)
 - **Respawn**: Defeated players respawn with full health at a random position
+- **Experience**: Players earn XP for successful attacks
+- **Levels**: Players progress through levels as they gain experience
 
 ## How to Attack
 
@@ -47,6 +49,28 @@ The game provides feedback on combat actions:
 - Track your health and retreat when necessary
 - Be aware of your attack cooldown timer
 - Use movement strategically to position yourself for attacks or escape
+
+## Experience and Leveling System
+
+### Experience Points (XP)
+
+- **Earning XP**: Players earn experience points by attacking other players
+- **XP for Damage**: Each point of damage dealt awards 1 XP
+- **Bonus XP**: Defeating a player (reducing their health to zero) awards 20 bonus XP
+
+### Player Levels
+
+- **Starting Level**: All players begin at Level 1 with 0 XP
+- **Level Progression**: Players need (level × 100) XP to advance to the next level
+  - Level 2 requires 100 XP
+  - Level 3 requires 200 XP
+  - And so on
+
+### Level Benefits
+
+- **Damage Bonus**: +2 damage per level above level 1
+- **Health Bonus**: +5 maximum health per level above level 1
+- **Visual Indicator**: Your current level is displayed in your player stats
 
 ## Future Combat Enhancements
 

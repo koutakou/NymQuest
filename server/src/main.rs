@@ -190,6 +190,8 @@ async fn main() -> Result<()> {
                     position: persisted_player.position,
                     health: persisted_player.health,
                     last_attack_time: persisted_player.last_attack_time,
+                    experience: persisted_player.experience,
+                    level: persisted_player.level,
                 };
 
                 // Validate position is still within current world boundaries

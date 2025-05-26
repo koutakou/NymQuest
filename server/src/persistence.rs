@@ -32,6 +32,10 @@ pub struct PersistedPlayer {
     pub position: Position,
     pub health: u32,
     pub last_attack_time: u64,
+    /// Experience points earned through gameplay
+    pub experience: u32,
+    /// Player level based on experience
+    pub level: u8,
     /// Timestamp when player was last active (for cleanup purposes)
     pub last_active: u64,
 }
@@ -142,6 +146,8 @@ impl GameStatePersistence {
                     position: player.position,
                     health: player.health,
                     last_attack_time: player.last_attack_time,
+                    experience: player.experience,
+                    level: player.level,
                     last_active: now, // Mark as active during save
                 };
                 (id.clone(), persisted)
@@ -365,6 +371,8 @@ mod tests {
             position: Position::new(10.0, 20.0),
             health: 100,
             last_attack_time: 1234567890,
+            experience: 50,
+            level: 1,
         };
         players.insert("player1".to_string(), player);
 
@@ -426,6 +434,8 @@ mod tests {
                 position: Position::new(0.0, 0.0),
                 health: 100,
                 last_attack_time: 0,
+                experience: 25,
+                level: 1,
                 last_active: now,
             },
         );
@@ -440,6 +450,8 @@ mod tests {
                 position: Position::new(0.0, 0.0),
                 health: 100,
                 last_attack_time: 0,
+                experience: 75,
+                level: 2,
                 last_active: now - 3600, // 1 hour ago
             },
         );

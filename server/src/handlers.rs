@@ -1254,7 +1254,7 @@ async fn handle_attack(
         };
 
         // Apply damage and check if target was defeated
-        let target_defeated = game_state.apply_damage(&target_id, damage);
+        let target_defeated = game_state.apply_damage(&target_id, &attacker_id, damage);
 
         // Send notification to the target
         if let Some(tag) = target_tag {

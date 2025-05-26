@@ -443,6 +443,16 @@ pub fn render_player_stats(player: &Player, is_current: bool) {
             player.position.x, player.position.y
         ),
         format!("Health: {}", format_health(player.health, 15)),
+        format!(
+            "Level: {}",
+            player.level.to_string().bright_magenta().bold()
+        ),
+        // Show progress to next level
+        format!(
+            "XP: {} / {}",
+            player.experience.to_string().bright_cyan(),
+            ((player.level as u32 + 1) * 100).to_string().bright_blue()
+        ),
     ];
 
     draw_panel(&title, &content, PANEL_WIDTH, PanelStyle::Primary);

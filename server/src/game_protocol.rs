@@ -85,6 +85,8 @@ pub struct Player {
     pub health: u32,
     pub name: String,
     pub last_attack_time: u64,
+    pub experience: u32, // Experience points earned through gameplay
+    pub level: u8,       // Player level based on experience
 }
 
 // Type of client message (used for acknowledgements)

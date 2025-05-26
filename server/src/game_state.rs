@@ -153,8 +153,10 @@ impl GameState {
                 .take(self.config.max_player_name_length)
                 .collect(), // Ensure name is within limits
             position: available_position,
-            health: self.config.initial_player_health,
+            health: self.config.initial_player_health, // New players at level 1 don't get bonus health
             last_attack_time: now.saturating_sub(self.config.attack_cooldown_seconds), // Allow immediate first attack
+            experience: 0, // New players start with 0 experience
+            level: 1,      // New players start at level 1
         };
 
         // Add the player to the game state
@@ -362,8 +364,27 @@ impl GameState {
     }
 
     /// Apply damage to a player and return true if they were defeated
-    pub fn apply_damage(&self, target_id: &str, damage: u32) -> bool {
-        let actual_damage = damage.min(self.config.attack_damage); // Limit damage to configured max
+    /// Also awards experience points to the attacker
+    pub fn apply_damage(&self, target_id: &str, attacker_id: &str, damage: u32) -> bool {
+        // Get attacker level and calculate damage bonus
+        let attacker_level = match self.players.read() {
+            Ok(players) => {
+                if let Some(attacker) = players.get(attacker_id) {
+                    attacker.level
+                } else {
+                    1 // Default to level 1 if attacker not found
+                }
+            }
+            Err(e) => {
+                error!("Failed to get attacker level: {}", e);
+                1 // Default to level 1 on error
+            }
+        };
+
+        // Calculate damage with level-based bonus
+        let (damage_bonus, _) = Self::calculate_level_bonuses(attacker_level);
+        let modified_damage = damage + damage_bonus;
+        let actual_damage = modified_damage.min(self.config.attack_damage + damage_bonus); // Limit damage to configured max + bonus
 
         // First, determine if we need a new position by checking if player will be defeated
         let needs_respawn = match self.players.read() {
@@ -394,13 +415,15 @@ impl GameState {
         };
 
         // Now apply the damage and update position if needed
-        match self.players.write() {
+        // First apply damage and get result
+        let was_defeated = match self.players.write() {
             Ok(mut players) => {
                 if let Some(player) = players.get_mut(target_id) {
                     if let Some(respawn_pos) = new_position {
-                        // Player defeated - reset position and health
+                        // Player defeated - reset position and health (with level bonuses)
                         player.position = respawn_pos;
-                        player.health = self.config.initial_player_health;
+                        let (_, health_bonus) = Self::calculate_level_bonuses(player.level);
+                        player.health = self.config.initial_player_health + health_bonus;
                         info!(
                             "Player {} was defeated and respawned at {:?}",
                             target_id, player.position
@@ -416,14 +439,54 @@ impl GameState {
                     }
                 } else {
                     warn!("Attempted to damage non-existent player: {}", target_id);
-                    false
+                    return false;
                 }
             }
             Err(e) => {
                 error!("Failed to apply damage: {}", e);
-                false
+                return false;
+            }
+        };
+
+        // Award XP to the attacker
+        if attacker_id != target_id {
+            // No XP for self-damage
+            match self.players.write() {
+                Ok(mut players) => {
+                    if let Some(attacker) = players.get_mut(attacker_id) {
+                        // Award more XP for defeating a player
+                        let xp_gained = if was_defeated {
+                            // Bonus XP for defeating a player
+                            20 + actual_damage
+                        } else {
+                            // Base XP for dealing damage
+                            actual_damage
+                        };
+
+                        attacker.experience += xp_gained;
+
+                        // Check for level up - simple level formula: each level needs level*100 XP
+                        let next_level = attacker.level + 1;
+                        let xp_needed_for_level = (next_level as u32) * 100;
+
+                        if attacker.experience >= xp_needed_for_level {
+                            attacker.level = next_level;
+                            info!("Player {} reached level {}!", attacker_id, next_level);
+                        }
+
+                        info!(
+                            "Player {} gained {} XP for attacking {}",
+                            attacker_id, xp_gained, target_id
+                        );
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to award XP: {}", e);
+                }
             }
         }
+
+        was_defeated
     }
 
     /// Update a player's last attack time
@@ -591,6 +654,18 @@ impl GameState {
     pub fn get_connection_tag(&self, player_id: &str) -> Option<AnonymousSenderTag> {
         // This is essentially the same as get_sender_tag_by_player_id but with a public interface
         self.get_sender_tag_by_player_id(player_id)
+    }
+
+    /// Calculate level-based stat bonuses for a player
+    /// Returns a tuple of (damage_bonus, health_bonus)
+    pub fn calculate_level_bonuses(level: u8) -> (u32, u32) {
+        // Small bonuses that won't unbalance the game
+        // Each level provides +2 damage and +5 health
+        let level_above_base = level.saturating_sub(1) as u32; // Level 1 is base level
+        let damage_bonus = level_above_base * 2;
+        let health_bonus = level_above_base * 5;
+
+        (damage_bonus, health_bonus)
     }
 
     /// Function to generate a random position that is not already occupied by another player
