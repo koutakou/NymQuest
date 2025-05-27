@@ -13,12 +13,21 @@ All communications between clients and the server are routed through the Nym mix
 
 ## Message Authentication
 
-### HMAC-SHA256 Authentication
+### HMAC-SHA256 Authentication with Forward Secrecy
 
-All messages are cryptographically authenticated using HMAC-SHA256:
+All messages are cryptographically authenticated using HMAC-SHA256 with automatic key rotation:
 - **Integrity Protection**: Ensures messages are not tampered with in transit
 - **Origin Validation**: Verifies that messages come from authenticated sources
 - **Transparent Verification**: Authentication occurs automatically without user interaction
+- **Forward Secrecy**: Regular key rotation prevents past communications from being compromised if a key is exposed
+
+### Key Rotation System
+
+The authentication system implements automatic key rotation:
+- **Time-based Rotation**: Keys are automatically rotated every 24 hours
+- **Historical Key Retention**: Previous keys are securely maintained for a limited time to verify older messages
+- **Timestamp Binding**: Authentication tags are bound to specific key versions using timestamps
+- **Seamless Transition**: Key rotation occurs without disrupting active sessions
 
 ## Anti-Replay Protection
 

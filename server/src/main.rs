@@ -136,9 +136,29 @@ async fn main() -> Result<()> {
         "Server successfully connected to Nym mixnet"
     );
 
-    // Generate a new authentication key for this server session
-    let auth_key = AuthKey::new_random();
-    info!("Generated authentication key for secure message verification");
+    // Load the authentication key or create a new one
+    let auth_key_path = config_dir.join("auth_key.bin");
+    let mut auth_key = match AuthKey::load_or_create(&auth_key_path) {
+        Ok(key) => key,
+        Err(e) => {
+            error!("Failed to load or create authentication key: {}", e);
+            return Err(e);
+        }
+    };
+
+    // Check if key rotation is needed
+    if let Ok(rotated) = auth_key.check_and_rotate() {
+        if rotated {
+            info!("Authentication key was rotated for enhanced security");
+            // Save the updated keys
+            if let Err(e) = auth_key.save_to_file(&auth_key_path) {
+                error!("Failed to save rotated authentication key: {}", e);
+                // Non-fatal, can continue
+            }
+        }
+    }
+
+    info!("Using secure authentication key with rotation for message verification");
 
     // Write server address and authentication key to a file that the client can read
     if let Err(e) = save_server_address(&server_address, &auth_key) {
@@ -288,7 +308,7 @@ async fn main() -> Result<()> {
                 if let Err(e) = broadcast_shutdown_notification(
                     &client,
                     &game_state,
-                    "Server is shutting down. You will be disconnected shortly.",
+                    "Server is shutting down",
                     5, // 5 second countdown before forced disconnect
                     &auth_key
                 ).await {
