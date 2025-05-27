@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4] - 2025-05-27
+
+### Added
+- Experience points and leveling system for character progression
+- Key rotation mechanism with forward secrecy for enhanced message authentication
+- Message expiration mechanism to prevent delayed replay attacks
+- Improved security model with time-based message validity
+
 ## [0.1.3] - 2025-05-26
 
 ### Added
