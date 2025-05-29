@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
+use crate::mixnet_monitor::MixnetMonitor;
 
 use crate::config::GameConfig;
 use crate::game_protocol::{
@@ -168,9 +169,30 @@ fn next_seq_num() -> u64 {
     SERVER_SEQ_NUM.fetch_add(1, Ordering::SeqCst)
 }
 
+/// Track a mixnet message sending attempt for monitoring purposes
+/// This function is privacy-preserving as it only tracks success/failure without content details
+pub async fn track_message_send(result: std::result::Result<(), nym_sdk::Error>) -> Result<()> {
+    // Get a reference to the mixnet monitor
+    let monitor = MixnetMonitor::new();
+
+    // Record the message send attempt result
+    match result {
+        Ok(_) => {
+            // Record successful send
+            monitor.record_message_sent().await;
+            Ok(())
+        }
+        Err(e) => {
+            // Record failed send
+            monitor.record_send_failure();
+            Err(anyhow::anyhow!("{}", e))
+        }
+    }
+}
+
 /// Calculate maximum jitter in milliseconds based on base interval and jitter percentage
 /// This enhances privacy by making message processing timing less predictable
-fn calculate_max_jitter(base_interval_ms: u64, jitter_percent: u8) -> u64 {
+pub fn calculate_max_jitter(base_interval_ms: u64, jitter_percent: u8) -> u64 {
     if jitter_percent == 0 {
         return 0;
     }
@@ -621,9 +643,18 @@ pub async fn broadcast_game_state(
         }
 
         // Send the update to this player and track failures
-        if let Err(e) = client.send_reply(tag.clone(), serialized.clone()).await {
-            error!("Failed to send game state to player {}: {}", player_id, e);
-            failed_tags.push(tag);
+        let send_result = client.send_reply(tag.clone(), serialized.clone()).await;
+
+        // Track message send attempt with mixnet monitoring
+        match track_message_send(send_result).await {
+            Ok(_) => {
+                // Successfully sent
+                debug!("Game state sent to player {}", player_id);
+            }
+            Err(e) => {
+                error!("Failed to send game state to player {}: {}", player_id, e);
+                failed_tags.push(tag);
+            }
         }
     }
 

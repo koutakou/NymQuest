@@ -16,6 +16,8 @@ use uuid::Uuid;
 // Import message authentication module
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
 use crate::message_replay::is_message_replay;
+// Import mixnet health monitoring
+use crate::mixnet_health::MixnetHealth;
 
 use crate::game_protocol::{
     ClientMessage, ClientMessageType, Direction, EmoteType, ProtocolVersion, ServerMessage,
@@ -102,6 +104,10 @@ pub struct NetworkManager {
     pacing_enabled: bool,
     /// Last jitter applied to pacing (for monitoring)
     last_applied_jitter_ms: u64,
+    /// Mixnet health monitoring
+    mixnet_health: Arc<Mutex<MixnetHealth>>,
+    /// Is reconnection in progress
+    reconnection_in_progress: bool,
 }
 
 /// Calculate maximum jitter in milliseconds based on base interval and jitter percentage
@@ -196,6 +202,14 @@ impl NetworkManager {
 
         info!("Connected to Nym network!");
 
+        // Initialize mixnet health monitoring
+        let mixnet_health = Arc::new(Mutex::new(MixnetHealth::new()));
+
+        // Start health monitoring in the background
+        MixnetHealth::start_health_check(mixnet_health.clone(), status_monitor.clone())
+            .await
+            .with_context(|| "Failed to start mixnet health monitoring")?;
+
         Ok(Self {
             client: Some(client),
             server_address,
@@ -214,6 +228,8 @@ impl NetworkManager {
             pacing_interval_ms: config.message_pacing_interval_ms,
             pacing_enabled: config.enable_message_pacing,
             last_applied_jitter_ms: 0,
+            mixnet_health,
+            reconnection_in_progress: false,
         })
     }
 
@@ -375,20 +391,52 @@ impl NetworkManager {
             };
 
             debug!("Sending message with seq_num: {}", seq_num);
-            client
+            match client
                 .send_message(
                     server_address,
                     message_str.into_bytes(),
                     IncludedSurbs::default(),
                 )
-                .await?;
+                .await
+            {
+                Ok(_) => {
+                    // Record successful message sent in health monitor
+                    if let Ok(mut health) = self.mixnet_health.lock() {
+                        health.record_message_sent();
+                    }
 
-            // Update status monitor to record message sent
-            if let Ok(mut monitor) = self.status_monitor.lock() {
-                monitor.record_message_sent(seq_num);
-                // Update mixnet connection status
-                monitor.update_mixnet_status(true, Some(3), None);
-            }
+                    // Update status monitor to record message sent
+                    if let Ok(mut monitor) = self.status_monitor.lock() {
+                        monitor.record_message_sent(seq_num);
+                        // Update mixnet connection status
+                        monitor.update_mixnet_status(true, Some(3), None);
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to send message: {}", e);
+
+                    // Record failed delivery in health monitor
+                    if let Ok(mut health) = self.mixnet_health.lock() {
+                        health.record_delivery_outcome(false);
+                    }
+
+                    // If this is a critical message type, try to reconnect for future messages
+                    if matches!(
+                        message_with_seq.get_type(),
+                        ClientMessageType::Register | ClientMessageType::Heartbeat
+                    ) {
+                        // Mark client as disconnected to force reconnection on next send
+                        self.client = None;
+
+                        // Update status monitor
+                        if let Ok(mut monitor) = self.status_monitor.lock() {
+                            monitor.update_connection_status("Connection lost");
+                        }
+                    }
+
+                    return Err(anyhow!("Failed to send message: {}", e));
+                }
+            };
 
             // Update pacing
             self.last_message_sent = Some(Instant::now());
@@ -618,7 +666,18 @@ impl NetworkManager {
 
     /// Wait for the next message from the server and handle acknowledgements
     pub async fn receive_message(&mut self) -> Option<ServerMessage> {
-        // Early return if client is not connected
+        // Check if we need to reconnect before receiving
+        if self.client.is_none() {
+            debug!(
+                "Not connected to Nym network, attempting reconnection before receiving messages"
+            );
+            if let Err(e) = self.reconnect().await {
+                error!("Failed to reconnect to Nym network: {}", e);
+                return None;
+            }
+        }
+
+        // Early return if client is still not connected after reconnection attempt
         let client = match &mut self.client {
             Some(client) => client,
             None => return None,
@@ -626,8 +685,20 @@ impl NetworkManager {
 
         // Wait for the next message
         let received_message = match client.next().await {
-            Some(msg) => msg,
-            None => return None,
+            Some(msg) => {
+                // Record successful message reception in health monitor
+                if let Ok(mut health) = self.mixnet_health.lock() {
+                    health.record_message_received();
+                }
+                msg
+            }
+            None => {
+                // Record failed reception in health monitor
+                if let Ok(mut health) = self.mixnet_health.lock() {
+                    health.record_delivery_outcome(false);
+                }
+                return None;
+            }
         };
 
         // Check for empty messages
@@ -877,6 +948,106 @@ impl NetworkManager {
             info!("Already disconnected.");
             Ok(())
         }
+    }
+
+    /// Attempt to reconnect to the Nym network if disconnected
+    /// Returns true if reconnection was successful or already connected
+    pub async fn reconnect(&mut self) -> Result<bool> {
+        // If already connected, nothing to do
+        if self.client.is_some() {
+            return Ok(true);
+        }
+
+        // Avoid multiple simultaneous reconnection attempts
+        if self.reconnection_in_progress {
+            warn!("Reconnection already in progress, skipping duplicate attempt");
+            return Ok(false);
+        }
+
+        // Mark reconnection as in progress
+        self.reconnection_in_progress = true;
+
+        // Check if we should attempt reconnection based on backoff policy
+        let should_attempt = {
+            if let Ok(mut health) = self.mixnet_health.lock() {
+                health.should_attempt_reconnection()
+            } else {
+                // If we can't access health monitor, default to attempting reconnection
+                true
+            }
+        };
+
+        if !should_attempt {
+            self.reconnection_in_progress = false;
+            debug!("Skipping reconnection due to backoff policy");
+            return Ok(false);
+        }
+
+        info!("Attempting to reconnect to Nym network...");
+
+        // Configure Nym client with a unique directory for each instance
+        let unique_id = Uuid::new_v4().to_string();
+        let config_dir = PathBuf::from(format!("/tmp/nym_mmorpg_client_{}", unique_id));
+        let storage_paths = StoragePaths::new_from_dir(&config_dir)?;
+
+        // Update status monitor
+        if let Ok(mut monitor) = self.status_monitor.lock() {
+            monitor.update_connection_status("Reconnecting...");
+        }
+
+        // Attempt to create and connect a new client
+        match MixnetClientBuilder::new_with_default_storage(storage_paths).await {
+            Ok(builder) => {
+                match builder.build() {
+                    Ok(client) => {
+                        match client.connect_to_mixnet().await {
+                            Ok(connected_client) => {
+                                info!("Successfully reconnected to Nym network!");
+                                self.client = Some(connected_client);
+
+                                // Reset reconnection tracking
+                                if let Ok(mut health) = self.mixnet_health.lock() {
+                                    health.reset_reconnection_attempts();
+                                }
+
+                                // Update status monitor
+                                if let Ok(mut monitor) = self.status_monitor.lock() {
+                                    monitor.update_connection_status("Connected");
+                                }
+
+                                self.reconnection_in_progress = false;
+                                return Ok(true);
+                            }
+                            Err(e) => {
+                                error!("Failed to connect client to mixnet: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to build mixnet client: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                error!("Failed to create mixnet client builder: {}", e);
+            }
+        }
+
+        // If we get here, reconnection failed
+        self.reconnection_in_progress = false;
+
+        // Update status monitor
+        if let Ok(mut monitor) = self.status_monitor.lock() {
+            monitor.update_connection_status("Disconnected");
+        }
+
+        // Record failed delivery in health monitor
+        if let Ok(mut health) = self.mixnet_health.lock() {
+            health.record_delivery_outcome(false);
+        }
+
+        warn!("Reconnection to Nym network failed");
+        Ok(false)
     }
 
     /// Get sequence number for implicit acknowledgments based on server message type

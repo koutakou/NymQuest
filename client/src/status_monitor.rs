@@ -306,14 +306,39 @@ impl StatusMonitor {
 
     /// Update overall connection health and privacy level assessment
     fn update_status(&mut self) {
-        // Update timestamp handled by pacing_info
-        self.pacing_info.last_update = Instant::now();
-
-        // Assess connection health based on multiple factors
+        // Calculate current connection health and privacy level
         self.connection_health = self.assess_connection_health();
-
-        // Assess privacy level based on mixnet status and connection health
         self.privacy_level = self.assess_privacy_level();
+
+        // Update last status update timestamp in network stats
+        self.network_stats.last_successful_communication = Some(Instant::now());
+    }
+
+    /// Update the connection status with information from the mixnet health monitor
+    pub fn update_mixnet_health(&mut self, quality: String) {
+        // Update connection info with detailed mixnet health quality info
+        self.update_connection_info(format!("Mixnet health: {}", quality));
+
+        // Update connection health based on mixnet quality
+        self.connection_health = match quality.as_str() {
+            "Excellent" => ConnectionHealth::Excellent,
+            "Good" => ConnectionHealth::Good,
+            "Fair" => ConnectionHealth::Fair,
+            "Poor" => ConnectionHealth::Poor,
+            _ => ConnectionHealth::Critical,
+        };
+
+        // Update privacy level based on connection health
+        self.update_status();
+
+        // Update the last successful communication timestamp
+        self.network_stats.last_successful_communication = Some(Instant::now());
+    }
+
+    /// Update connection status message
+    pub fn update_connection_status(&mut self, status: &str) {
+        self.update_connection_info(format!("Connection: {}", status));
+        self.update_status();
     }
 
     /// Assess current connection health based on metrics

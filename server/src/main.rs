@@ -4,6 +4,7 @@ mod game_protocol;
 mod game_state;
 mod handlers;
 mod message_auth;
+mod mixnet_monitor;
 mod persistence;
 mod utils;
 
@@ -15,6 +16,7 @@ use handlers::{
     handle_client_message, init_rate_limiter, send_heartbeat_requests,
 };
 use message_auth::{AuthKey, AuthenticatedMessage};
+use mixnet_monitor::MixnetMonitor;
 use persistence::GameStatePersistence;
 use utils::save_server_address;
 
@@ -129,6 +131,15 @@ async fn main() -> Result<()> {
         .build()?;
 
     let mut client = client.connect_to_mixnet().await?;
+
+    info!("Connected to Nym network!");
+
+    // Initialize mixnet monitoring
+    let mixnet_monitor = MixnetMonitor::new();
+    MixnetMonitor::start_monitoring(mixnet_monitor.clone()).await?;
+
+    // Log initial connection state
+    mixnet_monitor.log_connection_stats().await;
 
     let server_address = client.nym_address().to_string();
     info!(
@@ -281,11 +292,15 @@ async fn main() -> Result<()> {
     // Message processing pacing for privacy protection
     let mut last_message_processed: Option<Instant> = None;
 
+    // Add monitoring stats interval (log every 60 seconds)
+    let mut monitor_stats_interval = interval(Duration::from_secs(60));
+
     // Skip the first tick to avoid immediate execution
     heartbeat_interval.tick().await;
     cleanup_interval.tick().await;
     persistence_interval.tick().await;
     rate_limiter_cleanup_interval.tick().await;
+    monitor_stats_interval.tick().await;
 
     // Main event loop with background task scheduling
     loop {
@@ -327,6 +342,9 @@ async fn main() -> Result<()> {
             received_message = client.next() => {
                 match received_message {
                     Some(message) => {
+                        // Record message received in mixnet monitor
+                        mixnet_monitor.record_message_received().await;
+
                         // Process the message
                         if let Err(e) = process_incoming_message(&client, &game_state, message.message, message.sender_tag, &auth_key, &game_config, &mut last_message_processed).await {
                             error!("Error processing incoming message: {}", e);
@@ -363,10 +381,10 @@ async fn main() -> Result<()> {
                 }
             },
 
-            // Clean up rate limiter periodically
-            _ = rate_limiter_cleanup_interval.tick() => {
-                cleanup_rate_limiter();
-                debug!("Performed rate limiter cleanup");
+            // Record and log mixnet health statistics periodically
+            _ = monitor_stats_interval.tick() => {
+                // Log the current mixnet health statistics
+                mixnet_monitor.log_connection_stats().await;
             }
         }
     }
@@ -397,6 +415,8 @@ async fn process_incoming_message(
     game_config: &GameConfig,
     last_message_processed: &mut Option<Instant>,
 ) -> Result<()> {
+    // Access the mixnet monitor using a static reference
+    let mixnet_monitor = MixnetMonitor::new();
     let message_content = received_message.into();
 
     // Apply message processing pacing with jitter for enhanced privacy protection
@@ -498,19 +518,23 @@ async fn process_incoming_message(
                                 "Processing authenticated client message"
                             );
 
-                            if let Err(e) = handle_client_message(
+                            let result = handle_client_message(
                                 client,
                                 game_state,
                                 client_message,
                                 sender_tag,
                                 auth_key,
                             )
-                            .await
-                            {
+                            .await;
+
+                            if let Err(e) = result {
                                 error!(
                                     error = %e,
                                     "Failed to handle client message"
                                 );
+
+                                // Record the failure in mixnet monitor
+                                mixnet_monitor.record_send_failure();
                             }
                         }
                         Ok(false) => {

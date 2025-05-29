@@ -5,6 +5,7 @@ mod game_protocol;
 mod game_state;
 mod message_auth;
 mod message_replay;
+mod mixnet_health;
 mod network;
 mod renderer;
 mod status_monitor;

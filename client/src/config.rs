@@ -38,6 +38,20 @@ pub struct ClientConfig {
     pub message_pacing_jitter_percent: u8,
     /// Replay protection window size (number of sequence numbers to track for replay prevention)
     pub replay_protection_window_size: u8,
+    /// Health check interval in milliseconds
+    pub health_check_interval_ms: u64,
+    /// Minimum reconnect interval in milliseconds
+    pub min_reconnect_interval_ms: u64,
+    /// Maximum number of consecutive reconnection attempts
+    pub max_reconnect_attempts: u8,
+    /// Exponential backoff multiplier for reconnection attempts
+    pub reconnect_backoff_multiplier: f32,
+    /// Connection quality threshold for poor connection (0.0-1.0)
+    pub connection_quality_threshold_poor: f32,
+    /// Connection quality threshold for fair connection (0.0-1.0)
+    pub connection_quality_threshold_fair: f32,
+    /// Window size for connection quality assessment
+    pub connection_quality_window_size: usize,
 }
 
 impl Default for ClientConfig {
@@ -59,6 +73,13 @@ impl Default for ClientConfig {
             enable_message_pacing: true, // Enabled by default for better privacy
             message_pacing_jitter_percent: 25, // Add up to 25% random jitter to message pacing
             replay_protection_window_size: 64, // Default window size for tracking sequence numbers
+            health_check_interval_ms: 10000, // Check health every 10 seconds
+            min_reconnect_interval_ms: 5000, // Wait at least 5 seconds between reconnection attempts
+            max_reconnect_attempts: 5,       // Maximum number of consecutive reconnection attempts
+            reconnect_backoff_multiplier: 1.5, // Each reconnection attempt waits 1.5x longer
+            connection_quality_threshold_poor: 0.3, // Below 30% success rate is poor
+            connection_quality_threshold_fair: 0.7, // Below 70% success rate is fair
+            connection_quality_window_size: 20, // Consider last 20 messages for quality assessment
         }
     }
 }
@@ -122,7 +143,37 @@ impl ClientConfig {
             config.replay_protection_window_size,
         )?;
 
-        // Validate configuration
+        // Load mixnet health monitoring configuration
+        config.health_check_interval_ms = Self::load_env_u64(
+            "NYMQUEST_CLIENT_HEALTH_CHECK_INTERVAL_MS",
+            config.health_check_interval_ms,
+        )?;
+        config.min_reconnect_interval_ms = Self::load_env_u64(
+            "NYMQUEST_CLIENT_MIN_RECONNECT_INTERVAL_MS",
+            config.min_reconnect_interval_ms,
+        )?;
+        config.max_reconnect_attempts = Self::load_env_u8(
+            "NYMQUEST_CLIENT_MAX_RECONNECT_ATTEMPTS",
+            config.max_reconnect_attempts,
+        )?;
+        config.reconnect_backoff_multiplier = Self::load_env_f32(
+            "NYMQUEST_CLIENT_RECONNECT_BACKOFF_MULTIPLIER",
+            config.reconnect_backoff_multiplier,
+        )?;
+        config.connection_quality_threshold_poor = Self::load_env_f32(
+            "NYMQUEST_CLIENT_CONN_QUALITY_THRESHOLD_POOR",
+            config.connection_quality_threshold_poor,
+        )?;
+        config.connection_quality_threshold_fair = Self::load_env_f32(
+            "NYMQUEST_CLIENT_CONN_QUALITY_THRESHOLD_FAIR",
+            config.connection_quality_threshold_fair,
+        )?;
+        config.connection_quality_window_size = Self::load_env_usize(
+            "NYMQUEST_CLIENT_CONN_QUALITY_WINDOW_SIZE",
+            config.connection_quality_window_size,
+        )?;
+
+        // Validate after loading all values
         config.validate()?;
 
         info!("Client configuration loaded and validated");
@@ -265,11 +316,69 @@ impl ClientConfig {
             ));
         }
 
-        // Validate jitter percentage
-        if self.message_pacing_jitter_percent > 100 {
+        // Validate pacing jitter percentage is within range
+        if !(0..=100).contains(&self.message_pacing_jitter_percent) {
             return Err(anyhow!(
-                "Invalid message pacing jitter: {}% (must be 0-100%)",
+                "Invalid message_pacing_jitter_percent value: {}, must be between 0-100",
                 self.message_pacing_jitter_percent
+            ));
+        }
+
+        // Validate mixnet health monitoring configuration
+        if self.health_check_interval_ms == 0 {
+            return Err(anyhow!(
+                "Invalid health_check_interval_ms value: {}, must be greater than 0",
+                self.health_check_interval_ms
+            ));
+        }
+
+        if self.min_reconnect_interval_ms == 0 {
+            return Err(anyhow!(
+                "Invalid min_reconnect_interval_ms value: {}, must be greater than 0",
+                self.min_reconnect_interval_ms
+            ));
+        }
+
+        if self.max_reconnect_attempts == 0 {
+            return Err(anyhow!(
+                "Invalid max_reconnect_attempts value: {}, must be greater than 0",
+                self.max_reconnect_attempts
+            ));
+        }
+
+        if self.reconnect_backoff_multiplier <= 1.0 {
+            return Err(anyhow!(
+                "Invalid reconnect_backoff_multiplier value: {}, must be greater than 1.0",
+                self.reconnect_backoff_multiplier
+            ));
+        }
+
+        if !(0.0..1.0).contains(&self.connection_quality_threshold_poor) {
+            return Err(anyhow!(
+                "Invalid connection_quality_threshold_poor value: {}, must be between 0.0-1.0",
+                self.connection_quality_threshold_poor
+            ));
+        }
+
+        if !(0.0..1.0).contains(&self.connection_quality_threshold_fair) {
+            return Err(anyhow!(
+                "Invalid connection_quality_threshold_fair value: {}, must be between 0.0-1.0",
+                self.connection_quality_threshold_fair
+            ));
+        }
+
+        if self.connection_quality_threshold_poor >= self.connection_quality_threshold_fair {
+            return Err(anyhow!(
+                "Invalid connection quality thresholds: poor ({}) must be less than fair ({})",
+                self.connection_quality_threshold_poor,
+                self.connection_quality_threshold_fair
+            ));
+        }
+
+        if self.connection_quality_window_size == 0 {
+            return Err(anyhow!(
+                "Invalid connection_quality_window_size value: {}, must be greater than 0",
+                self.connection_quality_window_size
             ));
         }
 
