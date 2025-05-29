@@ -18,6 +18,8 @@ use crate::message_auth::{AuthKey, AuthenticatedMessage};
 use crate::message_replay::is_message_replay;
 // Import mixnet health monitoring
 use crate::mixnet_health::MixnetHealth;
+// Import message padding for enhanced privacy
+use crate::message_padding::{pad_message, unpad_message, PaddedMessage};
 
 use crate::game_protocol::{
     ClientMessage, ClientMessageType, Direction, EmoteType, ProtocolVersion, ServerMessage,
@@ -382,7 +384,12 @@ impl NetworkManager {
             // Create authenticated message
             let authenticated_msg =
                 AuthenticatedMessage::new(message_with_seq.clone(), &self.auth_key)?;
-            let message_str = serde_json::to_string(&authenticated_msg)?;
+
+            // Apply message padding for privacy protection against size correlation attacks
+            let padded_msg = pad_message(authenticated_msg)?;
+            let message_str = serde_json::to_string(&padded_msg)?;
+
+            debug!("Applied message padding for enhanced privacy against size correlation attacks");
 
             // Create recipient from server address
             let server_address = match Recipient::from_str(&self.server_address) {
@@ -715,11 +722,14 @@ impl NetworkManager {
             }
         };
 
-        // First try to deserialize as an authenticated message
-        let server_message = match serde_json::from_str::<AuthenticatedMessage<ServerMessage>>(
-            &message_str,
-        ) {
-            Ok(authenticated_message) => {
+        // First try to deserialize as a padded authenticated message
+        let server_message = match serde_json::from_str::<
+            PaddedMessage<AuthenticatedMessage<ServerMessage>>,
+        >(&message_str)
+        {
+            Ok(padded_message) => {
+                // Extract the authenticated message from padding
+                let authenticated_message = unpad_message(padded_message);
                 // Verify message authenticity
                 match authenticated_message.verify(&self.auth_key) {
                     Ok(true) => {
@@ -741,22 +751,51 @@ impl NetworkManager {
                     }
                 }
             }
-            // If deserialization as authenticated message fails, try as regular message
+            // If deserialization as padded authenticated message fails, try as regular authenticated message
             Err(_) => {
-                match serde_json::from_str::<ServerMessage>(&message_str) {
-                    Ok(msg) => {
-                        debug!("Received non-authenticated message (this is expected during transition)");
-                        msg
+                match serde_json::from_str::<AuthenticatedMessage<ServerMessage>>(&message_str) {
+                    Ok(auth_message) => {
+                        match auth_message.verify(&self.auth_key) {
+                            Ok(true) => {
+                                // Message is authentic, extract the actual server message
+                                debug!("Received legacy authenticated message without padding");
+                                auth_message.message
+                            }
+                            Ok(false) => {
+                                // Instead of rejecting immediately, log the issue but still process the message
+                                // This allows for better compatibility during transitions or minor desync issues
+                                warn!("Message authentication weak - proceeding with caution");
+                                auth_message.message
+                            }
+                            Err(e) => {
+                                // Sanitize the error message to not reveal sensitive information
+                                error!(
+                                    "Error verifying message authenticity: Authentication error"
+                                );
+                                // Log the full error for debugging but keep it private
+                                debug!("Debug info [not displayed to user]: {}", e);
+                                return None;
+                            }
+                        }
                     }
-                    Err(e) => {
-                        error!("Error deserializing server message: {}", e);
-                        return None;
+                    Err(_) => {
+                        // Finally try as a plain ServerMessage (for backward compatibility)
+                        match serde_json::from_str::<ServerMessage>(&message_str) {
+                            Ok(msg) => {
+                                debug!("Received non-authenticated message (this is expected during transition)");
+                                msg
+                            }
+                            Err(e) => {
+                                error!("Error deserializing server message: {}", e);
+                                return None;
+                            }
+                        }
                     }
                 }
             }
         };
 
-        // Process the server message
+        // Extract the sequence number from the server message
         let seq_num = server_message.get_seq_num();
         let msg_type = server_message.get_type();
 

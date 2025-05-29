@@ -13,6 +13,7 @@ NymQuest is designed with privacy as a core principle. This document outlines th
 - **Anonymous Authentication**: Players can participate without revealing their real identity
 - **Anonymous Player Identification**: Uses anonymous sender tags for player tracking
 - **Enhanced Display IDs**: Players are assigned randomized display IDs using a word-number combination (e.g., Warrior123) rather than sequential numbering to improve anonymity
+- **Message Size Normalization**: All messages are padded to standard size buckets to prevent size correlation attacks
 
 ## Message Pacing
 
@@ -66,6 +67,19 @@ A key privacy enhancement is the configurable message pacing system that was imp
 - **Token Bucket Algorithm**: Manages message rates per connection without tracking identities
 - **Privacy-preserving**: Rate limits are applied per mixnet connection tag, not user identity
 - **Anonymity Preservation**: No identity tracking in rate limiting implementation
+
+## Message Size Normalization
+
+A new privacy enhancement that protects against size correlation attacks:
+
+- **Standard Size Buckets**: Messages are padded to fit standardized size buckets (128, 256, 512, 1024, 2048, 4096 bytes)
+- **Random Padding**: Messages are padded with random data to prevent analysis of padding content
+- **Size Correlation Prevention**: Prevents attackers from correlating messages based on their size
+- **Full Network Stack Coverage**: Applied to both client-to-server and server-to-client communications
+- **Transparent Implementation**: Works automatically without affecting game functionality
+- **Low Overhead**: Efficiently implemented to minimize performance impact
+
+This feature addresses a key privacy vulnerability where message sizes could leak information about message types and content, even when using the mixnet. By normalizing all messages to standard size buckets, this attack vector is eliminated.
 
 ## Privacy-Aware Monitoring
 

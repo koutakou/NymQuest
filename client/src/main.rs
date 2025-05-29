@@ -4,6 +4,7 @@ mod discovery;
 mod game_protocol;
 mod game_state;
 mod message_auth;
+mod message_padding;
 mod message_replay;
 mod mixnet_health;
 mod network;

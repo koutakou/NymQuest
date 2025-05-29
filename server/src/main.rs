@@ -4,6 +4,7 @@ mod game_protocol;
 mod game_state;
 mod handlers;
 mod message_auth;
+mod message_padding;
 mod mixnet_monitor;
 mod persistence;
 mod utils;
@@ -16,6 +17,7 @@ use handlers::{
     handle_client_message, init_rate_limiter, send_heartbeat_requests,
 };
 use message_auth::{AuthKey, AuthenticatedMessage};
+use message_padding::{unpad_message, PaddedMessage};
 use mixnet_monitor::MixnetMonitor;
 use persistence::GameStatePersistence;
 use utils::save_server_address;
@@ -504,9 +506,15 @@ async fn process_incoming_message(
         Ok(content) => {
             debug!(message_size = content.len(), "Processing incoming message");
 
-            // Try to deserialize as an authenticated message
-            match serde_json::from_str::<AuthenticatedMessage<ClientMessage>>(&content) {
-                Ok(authenticated_message) => {
+            // Try to deserialize as a padded authenticated message
+            match serde_json::from_str::<PaddedMessage<AuthenticatedMessage<ClientMessage>>>(
+                &content,
+            ) {
+                Ok(padded_message) => {
+                    debug!("Successfully parsed padded message");
+                    // Extract the authenticated message from the padding
+                    let authenticated_message = unpad_message(padded_message);
+
                     // Verify message authenticity and check expiration
                     match authenticated_message.verify(auth_key) {
                         Ok(true) => {

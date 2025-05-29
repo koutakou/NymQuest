@@ -10,6 +10,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tracing::{debug, error, info, trace, warn};
 
 use crate::message_auth::{AuthKey, AuthenticatedMessage};
+use crate::message_padding::pad_message;
 use crate::mixnet_monitor::MixnetMonitor;
 
 use crate::config::GameConfig;
@@ -625,7 +626,11 @@ pub async fn broadcast_game_state(
     let authenticated_message =
         AuthenticatedMessage::new_with_expiration(game_state_message, auth_key, message_ttl)?;
 
-    let serialized = serde_json::to_string(&authenticated_message)?;
+    // Apply message padding to prevent size correlation attacks
+    let padded_message = pad_message(authenticated_message)?;
+    debug!("Applied message padding to game state broadcast for enhanced privacy");
+
+    let serialized = serde_json::to_string(&padded_message)?;
 
     // Get a copy of all active connections
     let connections = game_state.get_connections();
@@ -815,7 +820,9 @@ pub async fn handle_client_message(
                     };
 
                     let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
-                    let error_json = serde_json::to_string(&authenticated_error)?;
+                    // Apply message padding for privacy protection
+                    let padded_error = pad_message(authenticated_error)?;
+                    let error_json = serde_json::to_string(&padded_error)?;
                     client.send_reply(sender_tag.clone(), error_json).await?;
 
                     return Ok(());
@@ -831,7 +838,9 @@ pub async fn handle_client_message(
                 };
 
                 let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
-                let error_json = serde_json::to_string(&authenticated_error)?;
+                // Apply message padding for privacy protection
+                let padded_error = pad_message(authenticated_error)?;
+                let error_json = serde_json::to_string(&padded_error)?;
 
                 client.send_reply(sender_tag.clone(), error_json).await?;
                 return Ok(());
@@ -1624,7 +1633,11 @@ pub async fn send_heartbeat_requests(
     let authenticated_request =
         AuthenticatedMessage::new_with_expiration(heartbeat_request, auth_key, message_ttl)?;
 
-    let serialized = serde_json::to_string(&authenticated_request)?;
+    // Apply message padding to prevent size correlation attacks
+    let padded_request = pad_message(authenticated_request)?;
+    debug!("Applied message padding to heartbeat request for enhanced privacy");
+
+    let serialized = serde_json::to_string(&padded_request)?;
 
     debug!(
         "Sending heartbeat requests to {} players",
