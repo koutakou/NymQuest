@@ -420,7 +420,7 @@ mod tests {
 
             // Calculate the required wait time with exponential backoff
             let required_wait =
-                MIN_RECONNECT_INTERVAL_MS as f32 * BACKOFF_MULTIPLIER.powi((attempt - 1) as i32);
+                MIN_RECONNECT_INTERVAL_MS as f32 * BACKOFF_MULTIPLIER.powi(attempt - 1);
 
             // Set the last attempt to be just shy of the required wait time
             health.last_reconnection_attempt =
