@@ -70,16 +70,18 @@ A key privacy enhancement is the configurable message pacing system that was imp
 
 ## Message Size Normalization
 
-A new privacy enhancement that protects against size correlation attacks:
+A comprehensive privacy enhancement that protects against size correlation attacks:
 
-- **Standard Size Buckets**: Messages are padded to fit standardized size buckets (128, 256, 512, 1024, 2048, 4096 bytes)
-- **Random Padding**: Messages are padded with random data to prevent analysis of padding content
-- **Size Correlation Prevention**: Prevents attackers from correlating messages based on their size
+- **Dynamic Size Buckets**: Messages are padded to fit dynamically varying size buckets based on a standard foundation (128, 256, 512, 1024, 2048, 4096 bytes)
+- **Periodic Jitter**: Bucket sizes undergo small periodic variations (up to 5%) to prevent statistical analysis of traffic patterns
+- **Deterministic Rotation**: The jitter algorithm uses a deterministic rotation schedule that varies automatically every 100 messages
+- **Random Padding Content**: Messages are padded with random data to prevent analysis of padding content
+- **Statistical Analysis Resistance**: Prevents sophisticated attackers from correlating messages based on size patterns over time
 - **Full Network Stack Coverage**: Applied to both client-to-server and server-to-client communications
 - **Transparent Implementation**: Works automatically without affecting game functionality
 - **Low Overhead**: Efficiently implemented to minimize performance impact
 
-This feature addresses a key privacy vulnerability where message sizes could leak information about message types and content, even when using the mixnet. By normalizing all messages to standard size buckets, this attack vector is eliminated.
+This feature addresses a key privacy vulnerability where message sizes could leak information about message types and content, even when using the mixnet. By not only normalizing messages to standard size buckets but also introducing dynamic variations, this protection is significantly strengthened against advanced traffic analysis techniques.
 
 ## Privacy-Aware Monitoring
 

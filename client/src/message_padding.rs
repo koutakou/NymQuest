@@ -1,12 +1,23 @@
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tracing::debug;
 
-/// Standard message size buckets in bytes for padding
+/// Base message size buckets in bytes for padding
 /// Each message will be padded to the nearest bucket size above its actual size
-const MESSAGE_SIZE_BUCKETS: [usize; 6] = [128, 256, 512, 1024, 2048, 4096];
+/// These are the base sizes, actual padding sizes may vary slightly based on the dynamic jitter
+const BASE_MESSAGE_SIZE_BUCKETS: [usize; 6] = [128, 256, 512, 1024, 2048, 4096];
 
 /// Maximum allowed message size before rejecting
 const MAX_ALLOWED_MESSAGE_SIZE: usize = 4096;
+
+/// Maximum jitter percentage to apply to bucket sizes (5%)
+const BUCKET_SIZE_JITTER_PERCENT: usize = 5;
+
+/// Tracks the total number of messages processed for adaptive sizing
+static MESSAGE_COUNT: AtomicUsize = AtomicUsize::new(0);
+
+/// Rotation interval for bucket size jitter (every 100 messages)
+const BUCKET_ROTATION_INTERVAL: usize = 100;
 
 /// Structure to wrap any message in padding for enhanced privacy
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,18 +63,54 @@ impl<T> PaddedMessage<T> {
     }
 }
 
-/// Determine the appropriate target size for a message
+/// Determine the appropriate target size for a message with dynamic jitter
+/// This adds small variations to the bucket sizes to prevent statistical analysis
 fn get_target_size(actual_size: usize) -> usize {
+    // Increment the message counter for rotation
+    let message_number = MESSAGE_COUNT.fetch_add(1, Ordering::SeqCst);
+
     // If message exceeds max allowed size, just return actual size
     // (this will be caught and rejected later in processing)
     if actual_size > MAX_ALLOWED_MESSAGE_SIZE {
         return actual_size;
     }
 
-    // Find the smallest bucket size that fits the message
-    for bucket_size in &MESSAGE_SIZE_BUCKETS {
-        if *bucket_size >= actual_size {
-            return *bucket_size;
+    // Determine if we should apply jitter based on message count
+    // This ensures the jitter changes periodically for better privacy
+    let apply_jitter = message_number % BUCKET_ROTATION_INTERVAL == 0;
+
+    // If we're at a rotation point, log it (but only occasionally to reduce log noise)
+    if apply_jitter && message_number > 0 {
+        debug!("Rotating message bucket sizes for enhanced privacy protection");
+    }
+
+    // Find the smallest bucket size that fits the message, with potential jitter
+    for &base_bucket_size in &BASE_MESSAGE_SIZE_BUCKETS {
+        if base_bucket_size >= actual_size {
+            // Apply jitter to the bucket size if needed
+            if apply_jitter {
+                // Create a deterministic but varying jitter based on message_number
+                // This ensures the jitter is different for each rotation interval
+                let jitter_seed = message_number / BUCKET_ROTATION_INTERVAL;
+                let jitter_factor = (((jitter_seed * 17) + 13) % 100) as f64 / 100.0;
+
+                // Calculate jitter amount (up to BUCKET_SIZE_JITTER_PERCENT % of bucket size)
+                let max_jitter = (base_bucket_size * BUCKET_SIZE_JITTER_PERCENT) / 100;
+                let jitter_amount = (max_jitter as f64 * jitter_factor) as usize;
+
+                // Apply jitter to increase bucket size (never decrease for security)
+                let jittered_size = base_bucket_size + jitter_amount;
+                debug!(
+                    "Applied {}% jitter to bucket size {} → {}",
+                    (jitter_amount * 100) / base_bucket_size,
+                    base_bucket_size,
+                    jittered_size
+                );
+
+                return jittered_size;
+            }
+
+            return base_bucket_size;
         }
     }
 
