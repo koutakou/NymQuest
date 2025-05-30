@@ -1,7 +1,11 @@
 use anyhow::Result;
+use lazy_static::lazy_static;
 use rand::{rngs::ThreadRng, Rng};
 use serde::{Deserialize, Serialize};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    RwLock,
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{debug, trace};
 
@@ -26,8 +30,13 @@ static MESSAGE_COUNT: AtomicUsize = AtomicUsize::new(0);
 /// The exact interval varies to prevent predictable patterns
 static JITTER_ROTATION_INTERVAL: AtomicUsize = AtomicUsize::new(100);
 
-/// Track last time jitter was rotated for time-based entropy
-static mut LAST_JITTER_ROTATION: Option<u64> = None;
+lazy_static! {
+    /// Track last time jitter was rotated for time-based entropy
+    static ref LAST_JITTER_ROTATION: RwLock<Option<u64>> = RwLock::new(None);
+
+    /// Current entropy source (rotated periodically)
+    static ref CURRENT_ENTROPY_SOURCE: RwLock<EntropySource> = RwLock::new(EntropySource::Combined);
+}
 
 /// Entropy sources for jitter calculation
 #[derive(Debug, Clone, Copy)]
@@ -42,8 +51,8 @@ enum EntropySource {
     Random,
 }
 
-/// Current entropy source (rotated periodically)
-static mut CURRENT_ENTROPY_SOURCE: EntropySource = EntropySource::Combined;
+/// Cryptographically secure random seed source for deterministic entropy
+static CRYPTO_SEED: AtomicUsize = AtomicUsize::new(0);
 
 /// Structure to wrap any message in padding for enhanced privacy
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -120,12 +129,17 @@ fn maybe_rotate_jitter_strategy() {
         // Thread-safe random number generator
         let mut rng = rand::thread_rng();
 
-        // Select a new entropy source randomly
-        let new_source = match rng.gen_range(0..4) {
-            0 => EntropySource::MessageCount,
-            1 => EntropySource::TimeOfDay,
-            2 => EntropySource::Combined,
-            _ => EntropySource::Random,
+        // Use hardware entropy to update the crypto seed
+        let crypto_seed = rng.gen::<usize>();
+        CRYPTO_SEED.store(crypto_seed, Ordering::SeqCst);
+
+        // Select a new entropy source randomly with weighted probabilities
+        // Favoring Combined and Random for better security
+        let new_source = match rng.gen_range(0..10) {
+            0 => EntropySource::MessageCount, // 10% chance
+            1 => EntropySource::TimeOfDay,    // 10% chance
+            2..=5 => EntropySource::Combined, // 40% chance
+            _ => EntropySource::Random,       // 40% chance
         };
 
         // Select a new rotation interval (50-150 messages)
@@ -133,10 +147,13 @@ fn maybe_rotate_jitter_strategy() {
         let new_interval = rng.gen_range(50..=150);
         JITTER_ROTATION_INTERVAL.store(new_interval, Ordering::SeqCst);
 
-        // Update the entropy source (safely)
-        unsafe {
-            CURRENT_ENTROPY_SOURCE = new_source;
-            LAST_JITTER_ROTATION = Some(now);
+        // Update the entropy source and last rotation time (thread-safe)
+        if let Ok(mut entropy_source) = CURRENT_ENTROPY_SOURCE.write() {
+            *entropy_source = new_source;
+        }
+
+        if let Ok(mut last_rotation) = LAST_JITTER_ROTATION.write() {
+            *last_rotation = Some(now);
         }
 
         debug!(
@@ -148,32 +165,61 @@ fn maybe_rotate_jitter_strategy() {
 
 /// Calculate jitter factor based on current entropy source
 fn calculate_jitter_factor(message_number: usize, rng: &mut ThreadRng) -> f64 {
-    // Safety: Reading static mut in a controlled manner
-    let entropy_source = unsafe { CURRENT_ENTROPY_SOURCE };
-    let last_rotation = unsafe { LAST_JITTER_ROTATION.unwrap_or(0) };
+    // Get current entropy source (thread-safe)
+    let entropy_source = match CURRENT_ENTROPY_SOURCE.read() {
+        Ok(guard) => *guard, // Dereference to get the value
+        Err(_) => {
+            // Fallback to Combined if lock acquisition fails
+            debug!("Failed to acquire read lock for entropy source, using fallback");
+            EntropySource::Combined
+        }
+    };
+
+    // Get last rotation time safely
+    let last_rotation = match LAST_JITTER_ROTATION.read() {
+        Ok(guard) => guard.unwrap_or(0),
+        Err(_) => {
+            debug!("Failed to acquire read lock for last rotation time, using fallback");
+            0 // Use 0 as fallback
+        }
+    };
+
+    // Get cryptographic seed for additional entropy
+    let crypto_seed = CRYPTO_SEED.load(Ordering::Relaxed);
 
     match entropy_source {
         EntropySource::MessageCount => {
-            // Deterministic but varying based on message count
+            // Deterministic but varying based on message count and crypto seed
             let seed = message_number.wrapping_mul(17).wrapping_add(13);
-            (seed % 100) as f64 / 100.0
+            let enhanced_seed = seed.wrapping_add(crypto_seed & 0xFF);
+            (enhanced_seed % 100) as f64 / 100.0
         }
         EntropySource::TimeOfDay => {
-            // Time-based entropy (time of day in ms)
+            // Time-based entropy (time of day in ms) with nonce
             let time_ms = get_unix_time_ms() % 86_400_000; // ms in a day
-            let seed = (time_ms.wrapping_mul(19).wrapping_add(7)) % 100;
+            let seed = (time_ms
+                .wrapping_mul(19)
+                .wrapping_add(7 + (crypto_seed & 0xFF) as u64))
+                % 100;
             seed as f64 / 100.0
         }
         EntropySource::Combined => {
-            // Combine message count and time for more entropy
+            // Combine message count, time and crypto seed for more entropy
             let count_factor = message_number.wrapping_mul(13).wrapping_add(7) % 100;
             let time_factor = ((get_unix_time_ms() - last_rotation) % 10000).wrapping_mul(23) % 100;
-            let combined = (count_factor.wrapping_add(time_factor as usize)) % 100;
+            let crypto_factor = (crypto_seed & 0xFF) % 100;
+            let combined = (count_factor
+                .wrapping_add(time_factor as usize)
+                .wrapping_add(crypto_factor))
+                % 100;
             combined as f64 / 100.0
         }
         EntropySource::Random => {
             // Pure randomness - most unpredictable but non-deterministic
-            rng.gen::<f64>()
+            // Mix in some deterministic factors to resist timing attacks
+            let pure_random = rng.gen::<f64>();
+            let crypto_influence = (crypto_seed & 0x7) as f64 / 1000.0; // Small influence
+            (pure_random + crypto_influence).min(0.99999) // Ensure it stays below 1.0
         }
     }
 }

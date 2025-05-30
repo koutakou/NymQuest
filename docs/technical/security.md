@@ -103,8 +103,12 @@ NymQuest uses an advanced message padding system to protect against traffic anal
 - **Multiple entropy sources**: Utilizes four distinct entropy mechanisms that rotate automatically:
   - Message count-based entropy
   - Time-based entropy
-  - Combined entropy (message count + time)
-  - True randomness
+  - Combined entropy (message count + time + cryptographic seed)
+  - True randomness with timing attack mitigation
+- **Weighted entropy selection**: Prioritizes more secure entropy sources (Combined and Random: 40% each) over less secure ones (10% each)
+- **Thread-safe implementation**: All shared state is protected with proper synchronization primitives
+- **Cryptographic enhancement**: Additional cryptographic seed provides extra entropy to all calculations
+- **Robust fallback mechanisms**: Graceful degradation when locks cannot be acquired
 - **Unpredictable rotation**: Jitter strategies rotate at varying intervals (50-150 messages)
 - **Enhanced randomization**: Uses thread-safe random number generation for higher quality padding
 

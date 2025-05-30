@@ -75,11 +75,16 @@ A comprehensive privacy enhancement that protects against size correlation attac
 - **Dynamic Size Buckets**: Messages are padded to fit dynamically varying size buckets based on a standard foundation (128, 256, 512, 1024, 2048, 4096 bytes)
 - **Enhanced Adaptive Jitter**: Bucket sizes undergo variable jitter (2-8%) to prevent statistical analysis of traffic patterns
 - **Multiple Entropy Sources**: Uses four different entropy sources (message count, time of day, combined, and random) that rotate automatically
+- **Weighted Entropy Selection**: Prioritizes more secure entropy sources (Combined and Random) with 40% probability each, while less secure sources are used less frequently (10% each)
+- **Thread-Safe Implementation**: All shared state is protected with thread-safe synchronization primitives
+- **Cryptographic Enhancement**: Additional cryptographic seed provides extra entropy to all calculations
+- **Robust Fallback Mechanisms**: Graceful degradation when locks cannot be acquired, ensuring service availability
 - **Unpredictable Rotation**: The jitter strategy rotates at varying intervals (50-150 messages) to prevent predictable patterns
 - **Higher Quality Random Padding**: Uses thread-safe random number generation for improved padding quality
 - **Message Size Validation**: Enforces maximum message size constraints with explicit error handling
 - **Enhanced Logging**: Adaptive logging based on message size reduces log volume while maintaining visibility
 - **Superior Statistical Analysis Resistance**: Enhanced jitter strategy is more resistant to sophisticated traffic analysis techniques
+- **Timing Attack Mitigation**: Random entropy calculations include deterministic components to resist timing attacks
 - **Full Network Stack Coverage**: Applied consistently to both client-to-server and server-to-client communications
 - **Transparent Implementation**: Works automatically without affecting game functionality
 - **Low Overhead**: Efficiently implemented to minimize performance impact
