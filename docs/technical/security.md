@@ -93,6 +93,33 @@ The game includes configurable message pacing to enhance privacy by preventing t
 - **Traffic analysis protection**: Reduces patterns that could be used for traffic analysis
 - **Configurable trade-offs**: Allows balancing privacy enhancement with responsiveness
 
+## Enhanced Message Padding
+
+NymQuest uses an advanced message padding system to protect against traffic analysis and size correlation attacks:
+
+### Adaptive Size Normalization
+- **Dynamic size buckets**: Messages are padded to standardized size buckets (128, 256, 512, 1024, 2048, 4096 bytes)
+- **Variable jitter range**: Applies 2-8% size jitter to prevent bucket size fingerprinting
+- **Multiple entropy sources**: Utilizes four distinct entropy mechanisms that rotate automatically:
+  - Message count-based entropy
+  - Time-based entropy
+  - Combined entropy (message count + time)
+  - True randomness
+- **Unpredictable rotation**: Jitter strategies rotate at varying intervals (50-150 messages)
+- **Enhanced randomization**: Uses thread-safe random number generation for higher quality padding
+
+### Security Features
+- **Size validation**: Enforces maximum message size constraints with proper error handling
+- **Efficient implementation**: Minimizes performance impact while maximizing privacy protection
+- **Consistent application**: Applied uniformly to both client-to-server and server-to-client communications
+- **Adaptive logging**: Reduces log volume for large messages while maintaining visibility
+
+### Privacy Benefits
+- **Prevents message type identification**: Makes it difficult to identify message types based on size
+- **Thwarts statistical analysis**: Multiple entropy sources and variable rotation intervals resist pattern recognition
+- **Machine learning resistance**: Enhanced jitter strategies make ML-based traffic analysis more difficult
+- **Cross-platform consistency**: Client and server implementations are synchronized for consistent protection
+
 ## Session Integrity
 
 ### Connection Management
