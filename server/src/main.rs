@@ -8,6 +8,7 @@ mod message_padding;
 mod mixnet_monitor;
 mod persistence;
 mod utils;
+mod world_lore;
 
 use config::GameConfig;
 use game_protocol::{ClientMessage, Player, Position};
@@ -224,6 +225,7 @@ async fn main() -> Result<()> {
                     last_attack_time: persisted_player.last_attack_time,
                     experience: persisted_player.experience,
                     level: persisted_player.level,
+                    faction: persisted_player.faction, // Include the player's faction from persistence
                 };
 
                 // Validate position is still within current world boundaries

@@ -793,6 +793,7 @@ pub async fn handle_client_message(
     match message {
         ClientMessage::Register {
             name,
+            faction,
             seq_num: _,
             protocol_version,
         } => {
@@ -846,8 +847,8 @@ pub async fn handle_client_message(
                 return Ok(());
             }
 
-            // Register the new player
-            let player_id = game_state.add_player(name, sender_tag);
+            // Register the new player with their chosen faction
+            let player_id = game_state.add_player(name, faction, sender_tag);
 
             // Create a successful registration response with negotiated version
             let register_ack = ServerMessage::RegisterAck {

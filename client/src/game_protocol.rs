@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::f32::consts::FRAC_1_SQRT_2;
 
+use crate::world_lore::Faction;
+
 /// Current protocol version - increment when making breaking changes
 pub const PROTOCOL_VERSION: u16 = 1;
 
@@ -86,8 +88,9 @@ pub struct Player {
     pub health: u32,
     pub name: String,
     pub last_attack_time: u64,
-    pub experience: u32, // Experience points earned through gameplay
-    pub level: u8,       // Player level based on experience
+    pub experience: u32,  // Experience points earned through gameplay
+    pub level: u8,        // Player level based on experience
+    pub faction: Faction, // The player's chosen faction
 }
 
 // Message types that the client can send to the server
@@ -96,6 +99,7 @@ pub enum ClientMessage {
     // Message to register in the game with protocol version negotiation
     Register {
         name: String,
+        faction: Faction, // Player's selected faction
         seq_num: u64,
         protocol_version: ProtocolVersion,
     },
@@ -361,13 +365,21 @@ impl Direction {
     }
 }
 
-// World boundaries
+// World boundaries with cypherpunk-themed properties
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldBoundaries {
     pub min_x: f32,
     pub max_x: f32,
     pub min_y: f32,
     pub max_y: f32,
+    /// Name of the region (e.g., "Neon Harbor", "The Deep Net")
+    pub name: String,
+    /// Security level in the region, affects encounter risks
+    pub security_level: String,
+    /// Surveillance density (0.0 to 1.0) affecting privacy
+    pub surveillance_density: f32,
+    /// The region type from worldbuilding lore
+    pub region_type: String,
 }
 
 impl WorldBoundaries {
@@ -398,9 +410,10 @@ impl WorldBoundaries {
     }
 }
 
-// Types of emotes that players can perform
+// Types of emotes that players can perform - enhanced with cypherpunk themes
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum EmoteType {
+    // Standard emotes
     Wave,
     Bow,
     Laugh,
@@ -410,6 +423,16 @@ pub enum EmoteType {
     Cheer,
     Clap,
     ThumbsUp,
+
+    // Cypherpunk-themed emotes
+    Hack,         // Mimics typing rapidly on an invisible keyboard
+    Encrypt,      // Makes encryption gestures
+    Decrypt,      // Makes decryption gestures
+    Surveillance, // Looks around suspiciously as if being watched
+    Resist,       // Raises fist in defiance
+    Ghost,        // Mimics disappearing/becoming anonymous
+    DataDrop,     // Pantomimes dropping/transferring data
+    Glitch,       // Deliberately glitches/pixelates movements
 }
 
 impl EmoteType {
@@ -417,6 +440,7 @@ impl EmoteType {
     #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn display_text(&self) -> &'static str {
         match self {
+            // Standard emotes
             EmoteType::Wave => "waves hello",
             EmoteType::Bow => "bows respectfully",
             EmoteType::Laugh => "laughs heartily",
@@ -426,6 +450,16 @@ impl EmoteType {
             EmoteType::Cheer => "cheers enthusiastically",
             EmoteType::Clap => "claps hands",
             EmoteType::ThumbsUp => "gives a thumbs up",
+
+            // Cypherpunk-themed emotes
+            EmoteType::Hack => "simulates frantic hacking",
+            EmoteType::Encrypt => "makes encryption gestures",
+            EmoteType::Decrypt => "performs decryption movements",
+            EmoteType::Surveillance => "looks around suspiciously",
+            EmoteType::Resist => "raises fist in digital defiance",
+            EmoteType::Ghost => "fades into digital anonymity",
+            EmoteType::DataDrop => "mimes a secure data transfer",
+            EmoteType::Glitch => "momentarily glitches out",
         }
     }
 
@@ -433,6 +467,7 @@ impl EmoteType {
     #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn display_icon(&self) -> &'static str {
         match self {
+            // Standard emotes
             EmoteType::Wave => "👋",
             EmoteType::Bow => "🙇",
             EmoteType::Laugh => "😂",
@@ -442,6 +477,16 @@ impl EmoteType {
             EmoteType::Cheer => "🎉",
             EmoteType::Clap => "👏",
             EmoteType::ThumbsUp => "👍",
+
+            // Cypherpunk-themed emotes
+            EmoteType::Hack => "⌨️",
+            EmoteType::Encrypt => "🔒",
+            EmoteType::Decrypt => "🔓",
+            EmoteType::Surveillance => "👁️",
+            EmoteType::Resist => "✊",
+            EmoteType::Ghost => "👻",
+            EmoteType::DataDrop => "💾",
+            EmoteType::Glitch => "📟",
         }
     }
 
@@ -449,6 +494,7 @@ impl EmoteType {
     #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
+            // Standard emotes
             "wave" | "hello" | "hi" => Some(EmoteType::Wave),
             "bow" => Some(EmoteType::Bow),
             "laugh" | "lol" | "haha" => Some(EmoteType::Laugh),
@@ -458,6 +504,17 @@ impl EmoteType {
             "cheer" => Some(EmoteType::Cheer),
             "clap" | "applaud" => Some(EmoteType::Clap),
             "thumbsup" | "thumbs" | "like" => Some(EmoteType::ThumbsUp),
+
+            // Cypherpunk-themed emotes
+            "hack" | "hacking" => Some(EmoteType::Hack),
+            "encrypt" | "encryption" => Some(EmoteType::Encrypt),
+            "decrypt" | "decryption" => Some(EmoteType::Decrypt),
+            "surveillance" | "watched" | "spy" => Some(EmoteType::Surveillance),
+            "resist" | "resistance" => Some(EmoteType::Resist),
+            "ghost" | "vanish" | "anonymous" => Some(EmoteType::Ghost),
+            "datadrop" | "data" | "transfer" => Some(EmoteType::DataDrop),
+            "glitch" | "malfunction" => Some(EmoteType::Glitch),
+
             _ => None,
         }
     }

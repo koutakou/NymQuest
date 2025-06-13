@@ -4,6 +4,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use crate::game_protocol::{Player, WorldBoundaries};
 use crate::status_monitor::StatusMonitor;
+use crate::world_lore::Faction;
 
 /// Represents a chat message with sender, content, timestamp, and message type
 pub struct ChatMessage {
@@ -60,6 +61,16 @@ impl GameState {
     /// Check if the player is registered
     pub fn is_registered(&self) -> bool {
         self.player_id.is_some()
+    }
+
+    /// Get the player's faction if registered
+    pub fn player_faction(&self) -> Option<Faction> {
+        if let Some(player_id) = &self.player_id {
+            if let Some(player) = self.players.get(player_id) {
+                return Some(player.faction.clone());
+            }
+        }
+        None
     }
 
     /// Get the current player if registered

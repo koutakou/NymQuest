@@ -694,7 +694,8 @@ pub fn render_help_section() {
     let commands = vec![
         format!("{} NymQuest Commands:", ICON_INFO).bright_green().bold().to_string(),
         "".to_string(),
-        format!("{} /register <name>, /r <name> - Register with the server using the specified name", ICON_BULLET),
+        format!("{} /register <name> <faction>, /r <name> <faction> - Register with the server using the specified name and faction", ICON_BULLET),
+        "    Valid factions: nyms, corporate, cipher, monks, indie - Each has unique gameplay benefits".to_string(),
         format!("{} /move <direction>, /m <direction> - Move in the specified direction", ICON_BULLET),
         "    Valid directions: up, down, left, right, upleft, upright, downleft, downright".to_string(),
         "    Direction shortcuts: /up (or /u, /n), /down (or /d, /s), /left (or /l, /w), /right (or /r, /e)".to_string(),
@@ -702,7 +703,9 @@ pub fn render_help_section() {
         format!("{} /attack <player_id>, /a <player_id> - Attack player with the given display ID", ICON_BULLET),
         format!("{} /chat <message>, /c <message>, /say <message> - Send a chat message to all players", ICON_BULLET),
         format!("{} /emote <type>, /em <type> - Perform an emote action", ICON_BULLET),
-        "    Available emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap".to_string(),
+        "    Standard emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap, thumbsup".to_string(),
+        "    Cypherpunk emotes: hack, encrypt, decrypt, surveillance, resist, ghost, datadrop, glitch".to_string(),
+        "    (Different factions have their own signature emotes in cypherpunk society)".to_string(),
         format!("{} /pacing [on|off] [interval_ms], /pace - Control message pacing for privacy protection", ICON_BULLET),
         "    Examples: /pacing on 150, /pacing off, /pacing status - View or modify timing protection".to_string(),
         format!("{} /help, /h, /? - Show this help information", ICON_BULLET),
@@ -782,10 +785,17 @@ pub fn render_game_state(state: &GameState) {
                     .bold()
                     .to_string(),
                 "".to_string(),
-                format!("{}  You are not registered yet", ICON_INFO)
+                format!("{} You are not registered yet", ICON_INFO)
                     .bright_yellow()
                     .to_string(),
-                format!("{}  Use /register <name> to join", ICON_ARROW_RIGHT),
+                format!(
+                    "{} Use /register <name> <faction> to join",
+                    ICON_ARROW_RIGHT
+                ),
+                format!(
+                    "{} Choose a faction: nyms, corporate, cipher, monks, indie",
+                    ICON_ARROW_RIGHT
+                ),
                 "".to_string(),
                 format!("{}  Privacy protected by Nym mixnet", ICON_PRIVACY)
                     .bright_cyan()
@@ -804,7 +814,10 @@ pub fn render_game_state(state: &GameState) {
             println!();
 
             let quick_commands = vec![
-                format!("{}  /register <name> - Join with chosen name", ICON_BULLET),
+                format!(
+                    "{} /register <name> <faction> - Join with chosen name and faction",
+                    ICON_BULLET
+                ),
                 format!("{}  /help - Show all commands", ICON_BULLET),
                 format!("{}  /quit - Exit game", ICON_BULLET),
             ];

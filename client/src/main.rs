@@ -11,6 +11,9 @@ mod network;
 mod renderer;
 mod status_monitor;
 mod ui_components;
+mod world_lore;
+
+use crate::world_lore::Faction;
 
 use colored::*;
 use rustyline::error::ReadlineError;
@@ -270,17 +273,18 @@ async fn process_user_command(
                 return Ok(());
             }
 
-            if command_parts.len() < 2 {
+            // Parse command: /register <name> <faction>
+            if command_parts.len() < 3 {
                 if let Ok(mut state) = game_state.lock() {
                     state.add_system_message(
                         "System".to_string(),
-                        "Please provide a name to register with".to_string(),
+                        "Usage: /register <name> <faction>\nAvailable factions:\n - nyms (The Nyms Coalition)\n - corporate/corp (Corporate Hegemony)\n - cipher/collective (Cipher Collective)\n - monks/algorithm (Algorithm Monks)\n - independent/indie (Independent Operators)".to_string(),
                     );
 
                     // Reset the registration status
                     if let Ok(mut monitor) = state.status_monitor.lock() {
                         monitor.update_game_state_info(
-                            "Registration failed - name required".to_string(),
+                            "Registration failed - incomplete information".to_string(),
                         );
                     }
 
@@ -289,11 +293,39 @@ async fn process_user_command(
                 return Ok(());
             }
 
-            let name = command_parts[1..].join(" ").trim().to_string();
+            let name = command_parts[1].trim().to_string();
+            let faction_input = command_parts[2].trim().to_lowercase();
+
+            // Parse faction selection
+            let faction = match faction_input.as_str() {
+                "nyms" => Faction::Nyms,
+                "corporate" | "corp" | "hegemony" => Faction::CorporateHegemony,
+                "cipher" | "collective" | "ciphercollective" => Faction::CipherCollective,
+                "monks" | "algorithm" | "algorithmmonks" => Faction::AlgorithmMonks,
+                "independent" | "indie" | "free" => Faction::Independent,
+                _ => {
+                    if let Ok(mut state) = game_state.lock() {
+                        state.add_system_message(
+                            "System".to_string(),
+                            "Invalid faction. Available options:\n - nyms (privacy advocates)\n - corporate/corp (corporate power)\n - cipher/collective (data liberation)\n - monks/algorithm (digital mystics)\n - independent/indie (free agents)".to_string(),
+                        );
+
+                        if let Ok(mut monitor) = state.status_monitor.lock() {
+                            monitor.update_game_state_info(
+                                "Registration failed - invalid faction".to_string(),
+                            );
+                        }
+
+                        render_game_state(&state);
+                    }
+                    return Ok(());
+                }
+            };
 
             // Create register message (sequence number handled by NetworkManager)
             let register_msg = ClientMessage::Register {
                 name: name.clone(),
+                faction: faction.clone(), // Add selected faction to registration message
                 protocol_version: ProtocolVersion::default(),
                 seq_num: 0, // Placeholder, will be replaced by NetworkManager
             };
@@ -302,7 +334,8 @@ async fn process_user_command(
             if let Ok(mut state) = game_state.lock() {
                 state.add_system_message(
                     "System".to_string(),
-                    format!("Attempting to register as '{}'. Please wait...", name),
+                    format!("Attempting to register as '{}' of the {} faction. Please wait...\nEach faction has unique advantages in the cypherpunk world.",
+                        name, format!("{:?}", faction).replace("CorporateHegemony", "Corporate Hegemony").replace("CipherCollective", "Cipher Collective").replace("AlgorithmMonks", "Algorithm Monks")),
                 );
                 render_game_state(&state);
             }
@@ -549,7 +582,18 @@ async fn process_user_command(
             }
 
             if command_parts.len() < 2 {
-                info!("Usage: emote <type>\nAvailable emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap");
+                // Get a lock on the game state to check faction
+                let faction_specific_help = match game_state.lock().ok().and_then(|state| state.player_faction()) {
+                    Some(Faction::Nyms) => "Your Nyms Coalition specialty: encrypt, ghost (enhanced privacy animations)",
+                    Some(Faction::CorporateHegemony) => "Your Corporate specialty: surveillance, datadrop (corporate-style animations)",
+                    Some(Faction::CipherCollective) => "Your Cipher Collective specialty: hack, decrypt (data liberation animations)",
+                    Some(Faction::AlgorithmMonks) => "Your Algorithm Monks specialty: encrypt, decrypt (mystical pattern animations)",
+                    Some(Faction::Independent) => "Your Independent specialty: resist, glitch (unique rogue animations)",
+                    None => "Register with a faction to unlock specialty emotes"
+                };
+
+                info!("Usage: emote <type>\nStandard emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap, thumbsup\nCypherpunk emotes: hack, encrypt, decrypt, surveillance, resist, ghost, datadrop, glitch\n{}", 
+                    faction_specific_help);
                 return Ok(());
             }
 
@@ -563,7 +607,16 @@ async fn process_user_command(
                 network.send_message(emote_msg).await?;
                 info!("Emote '{}' sent...", emote_name);
             } else {
-                info!("Invalid emote type! Available emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap");
+                info!("Invalid emote type!\nStandard emotes: wave, bow, laugh, dance, salute, shrug, cheer, clap, thumbsup\nCypherpunk emotes: hack, encrypt, decrypt, surveillance, resist, ghost, datadrop, glitch\n(Your faction specialty: {}) ", 
+                    match game_state.lock().ok().and_then(|state| state.player_faction()) {
+                        Some(Faction::Nyms) => "encrypt, ghost (enhanced privacy effects)",
+                        Some(Faction::CorporateHegemony) => "surveillance, datadrop (corporate style)",
+                        Some(Faction::CipherCollective) => "hack, decrypt (data liberation effects)",
+                        Some(Faction::AlgorithmMonks) => "encrypt, decrypt (mystical patterns)",
+                        Some(Faction::Independent) => "resist, glitch (unique animations)",
+                        None => "register to unlock faction specialty emotes"
+                    }
+                );
             }
         }
         // Exit commands

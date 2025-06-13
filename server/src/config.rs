@@ -111,8 +111,9 @@ pub struct GameConfig {
     pub message_processing_jitter_percent: u8,
 
     /// Default expiration time in seconds for authenticated messages
-    /// Messages older than this time will be rejected, preventing delayed replay attacks
     pub message_expiration_seconds: Option<u64>,
+    /// World region (cypherpunk setting)
+    pub world_region: Option<String>,
 }
 
 impl Default for GameConfig {
@@ -151,6 +152,7 @@ impl Default for GameConfig {
             replay_protection_adjustment_cooldown: 60,
             message_processing_jitter_percent: 25, // Default 25% jitter for privacy protection
             message_expiration_seconds: Some(300), // 5 minutes by default
+            world_region: None,
         }
     }
 }
@@ -165,6 +167,8 @@ impl GameConfig {
         config.world_min_x = Self::load_env_f32("NYMQUEST_WORLD_MIN_X", config.world_min_x)?;
         config.world_max_y = Self::load_env_f32("NYMQUEST_WORLD_MAX_Y", config.world_max_y)?;
         config.world_min_y = Self::load_env_f32("NYMQUEST_WORLD_MIN_Y", config.world_min_y)?;
+        config.world_region =
+            Self::load_env_string_opt("NYMQUEST_WORLD_REGION", config.world_region.clone())?;
 
         config.movement_speed =
             Self::load_env_f32("NYMQUEST_MOVEMENT_SPEED", config.movement_speed)?;
@@ -317,6 +321,7 @@ impl GameConfig {
                 "Replay protection window size: {}",
                 config.replay_protection_window_size
             );
+            info!("World region: {:?}", config.world_region);
 
             // Mark as logged to avoid redundancy
             CONFIG_LOGGED.store(true, Ordering::SeqCst);
@@ -567,6 +572,17 @@ impl GameConfig {
                 _ => default,
             },
             Err(_) => default,
+        }
+    }
+
+    /// Load an Option<String> value from an environment variable, or use the default if not present
+    fn load_env_string_opt(var_name: &str, default: Option<String>) -> Result<Option<String>> {
+        match env::var(var_name) {
+            Ok(val) => {
+                debug!("Loaded {} = {}", var_name, val);
+                Ok(Some(val))
+            }
+            Err(_) => Ok(default),
         }
     }
 }

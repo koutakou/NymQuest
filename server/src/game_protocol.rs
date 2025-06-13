@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::f32::consts::FRAC_1_SQRT_2;
 
+use crate::world_lore::{Faction, WorldRegion};
+
 /// Current protocol version - increment when making breaking changes
 pub const PROTOCOL_VERSION: u16 = 1;
 
@@ -80,13 +82,14 @@ impl Position {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Player {
     pub id: String,         // Internal server ID (UUID) - not exposed to other clients
-    pub display_id: String, // Public identifier for display (e.g., "Player1", "Player2")
+    pub display_id: String, // Public privacy-preserving identifier (e.g. "Player1")
     pub position: Position,
     pub health: u32,
     pub name: String,
     pub last_attack_time: u64,
-    pub experience: u32, // Experience points earned through gameplay
-    pub level: u8,       // Player level based on experience
+    pub experience: u32,  // Experience points earned through gameplay
+    pub level: u8,        // Player level based on experience
+    pub faction: Faction, // The player's chosen faction
 }
 
 // Type of client message (used for acknowledgements)
@@ -109,6 +112,7 @@ pub enum ClientMessage {
     // Message to register in the game with protocol version negotiation
     Register {
         name: String,
+        faction: Faction, // Player's selected faction
         seq_num: u64,
         protocol_version: ProtocolVersion,
     },
@@ -364,13 +368,21 @@ impl Direction {
     }
 }
 
-// World boundaries
+// World boundaries with cypherpunk-themed properties
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorldBoundaries {
     pub min_x: f32,
     pub max_x: f32,
     pub min_y: f32,
     pub max_y: f32,
+    /// Name of the region (e.g., "Neon Harbor", "The Deep Net")
+    pub name: String,
+    /// Security level in the region, affects encounter risks
+    pub security_level: String,
+    /// Surveillance density (0.0 to 1.0) affecting privacy
+    pub surveillance_density: f32,
+    /// The region type from worldbuilding lore
+    pub region_type: String,
 }
 
 impl WorldBoundaries {
@@ -404,18 +416,90 @@ impl WorldBoundaries {
 
     /// Create WorldBoundaries from GameConfig
     pub fn from_config(config: &crate::config::GameConfig) -> Self {
+        let region = if let Some(region_type) = &config.world_region {
+            region_type.clone()
+        } else {
+            "Neon Harbor".to_string()
+        };
+
+        // Convert to WorldRegion enum if possible, otherwise use default
+        let world_region = match region.as_str() {
+            "Neon Harbor" => WorldRegion::NeonHarbor,
+            "Deep Net" => WorldRegion::DeepNet,
+            "Data Havens" => WorldRegion::DataHavens,
+            "Dead Zones" => WorldRegion::DeadZones,
+            "The Grid" => WorldRegion::TheGrid,
+            _ => WorldRegion::NeonHarbor,
+        };
+
+        // Get lore boundaries with all properties
+        let lore_boundaries = world_region.get_boundaries();
+
+        // Create new boundaries with cypherpunk properties
         Self {
             min_x: config.world_min_x,
             max_x: config.world_max_x,
             min_y: config.world_min_y,
             max_y: config.world_max_y,
+            name: lore_boundaries.name.to_string(),
+            security_level: format!("{:?}", lore_boundaries.security_level),
+            surveillance_density: lore_boundaries.surveillance_density,
+            region_type: region,
         }
+    }
+
+    /// Calculate surveillance risk for a given position
+    /// Returns a value from 0.0 (no surveillance) to 1.0 (maximum surveillance)
+    #[allow(dead_code)]
+    pub fn calculate_surveillance_risk(&self, x: f32, y: f32) -> f32 {
+        if !self.is_position_valid(x, y) {
+            return 0.0;
+        }
+
+        // Base risk from the region's surveillance density
+        let mut risk = self.surveillance_density;
+
+        // Distance from center affects risk - closer to center is higher risk in most regions
+        let center_x = (self.min_x + self.max_x) / 2.0;
+        let center_y = (self.min_y + self.max_y) / 2.0;
+
+        let max_distance =
+            ((self.max_x - self.min_x).powi(2) + (self.max_y - self.min_y).powi(2)).sqrt() / 2.0;
+        let distance = ((x - center_x).powi(2) + (y - center_y).powi(2)).sqrt();
+        let distance_factor = 1.0 - (distance / max_distance);
+
+        // Adjust risk based on security level
+        match self.security_level.as_str() {
+            "Maximum" => {
+                // In maximum security, it's equally surveilled everywhere
+                risk *= 0.8 + (0.2 * distance_factor);
+            }
+            "High" => {
+                // High security has more surveillance in the center
+                risk *= 0.6 + (0.4 * distance_factor);
+            }
+            "Moderate" => {
+                // Moderate security has some surveillance hotspots
+                risk *= 0.4 + (0.6 * distance_factor);
+            }
+            "Low" => {
+                // Low security has minimal surveillance mostly at the edges
+                risk *= 0.2 + (0.1 * distance_factor);
+            }
+            _ => {
+                // No security has almost no surveillance
+                risk *= 0.05;
+            }
+        }
+
+        risk.clamp(0.0, 1.0)
     }
 }
 
-// Types of emotes that players can perform
+// Types of emotes that players can perform - enhanced with cypherpunk themes
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum EmoteType {
+    // Standard emotes
     Wave,
     Bow,
     Laugh,
@@ -425,6 +509,16 @@ pub enum EmoteType {
     Cheer,
     Clap,
     ThumbsUp,
+
+    // Cypherpunk-themed emotes
+    Hack,         // Mimics typing rapidly on an invisible keyboard
+    Encrypt,      // Makes encryption gestures
+    Decrypt,      // Makes decryption gestures
+    Surveillance, // Looks around suspiciously as if being watched
+    Resist,       // Raises fist in defiance
+    Ghost,        // Mimics disappearing/becoming anonymous
+    DataDrop,     // Pantomimes dropping/transferring data
+    Glitch,       // Deliberately glitches/pixelates movements
 }
 
 impl EmoteType {
@@ -432,6 +526,7 @@ impl EmoteType {
     #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn display_text(&self) -> &'static str {
         match self {
+            // Standard emotes
             EmoteType::Wave => "waves hello",
             EmoteType::Bow => "bows respectfully",
             EmoteType::Laugh => "laughs heartily",
@@ -441,6 +536,16 @@ impl EmoteType {
             EmoteType::Cheer => "cheers enthusiastically",
             EmoteType::Clap => "claps hands",
             EmoteType::ThumbsUp => "gives a thumbs up",
+
+            // Cypherpunk-themed emotes
+            EmoteType::Hack => "simulates frantic hacking",
+            EmoteType::Encrypt => "makes encryption gestures",
+            EmoteType::Decrypt => "performs decryption movements",
+            EmoteType::Surveillance => "looks around suspiciously",
+            EmoteType::Resist => "raises fist in digital defiance",
+            EmoteType::Ghost => "fades into digital anonymity",
+            EmoteType::DataDrop => "mimes a secure data transfer",
+            EmoteType::Glitch => "momentarily glitches out",
         }
     }
 
@@ -448,6 +553,7 @@ impl EmoteType {
     #[allow(dead_code)] // Part of complete protocol API for future use
     pub fn display_icon(&self) -> &'static str {
         match self {
+            // Standard emotes
             EmoteType::Wave => "👋",
             EmoteType::Bow => "🙇",
             EmoteType::Laugh => "😂",
@@ -457,12 +563,23 @@ impl EmoteType {
             EmoteType::Cheer => "🎉",
             EmoteType::Clap => "👏",
             EmoteType::ThumbsUp => "👍",
+
+            // Cypherpunk-themed emotes
+            EmoteType::Hack => "⌨️",
+            EmoteType::Encrypt => "🔒",
+            EmoteType::Decrypt => "🔓",
+            EmoteType::Surveillance => "👁️",
+            EmoteType::Resist => "✊",
+            EmoteType::Ghost => "👻",
+            EmoteType::DataDrop => "💾",
+            EmoteType::Glitch => "📟",
         }
     }
 
     #[allow(dead_code)]
     pub fn from_str(s: &str) -> Option<Self> {
         match s.to_lowercase().as_str() {
+            // Standard emotes
             "wave" | "hello" | "hi" => Some(EmoteType::Wave),
             "bow" => Some(EmoteType::Bow),
             "laugh" | "lol" | "haha" => Some(EmoteType::Laugh),
@@ -472,6 +589,17 @@ impl EmoteType {
             "cheer" => Some(EmoteType::Cheer),
             "clap" | "applaud" => Some(EmoteType::Clap),
             "thumbsup" | "thumbs" | "like" => Some(EmoteType::ThumbsUp),
+
+            // Cypherpunk-themed emotes
+            "hack" | "hacking" => Some(EmoteType::Hack),
+            "encrypt" | "encryption" => Some(EmoteType::Encrypt),
+            "decrypt" | "decryption" => Some(EmoteType::Decrypt),
+            "surveillance" | "watched" | "spy" => Some(EmoteType::Surveillance),
+            "resist" | "resistance" => Some(EmoteType::Resist),
+            "ghost" | "vanish" | "anonymous" => Some(EmoteType::Ghost),
+            "datadrop" | "data" | "transfer" => Some(EmoteType::DataDrop),
+            "glitch" | "malfunction" => Some(EmoteType::Glitch),
+
             _ => None,
         }
     }

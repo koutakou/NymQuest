@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use crate::config::GameConfig;
 use crate::game_protocol::{Player, Position};
+use crate::world_lore::Faction;
 use nym_sdk::mixnet::AnonymousSenderTag;
 
 /// Type alias for a player ID and its associated sender tag
@@ -53,7 +54,12 @@ impl GameState {
     }
 
     /// Add a new player to the game
-    pub fn add_player(&self, name: String, sender_tag: AnonymousSenderTag) -> String {
+    pub fn add_player(
+        &self,
+        name: String,
+        faction: Faction,
+        sender_tag: AnonymousSenderTag,
+    ) -> String {
         // Validate player name length according to configuration
         if name.len() > self.config.max_player_name_length {
             warn!(
@@ -157,6 +163,7 @@ impl GameState {
             last_attack_time: now.saturating_sub(self.config.attack_cooldown_seconds), // Allow immediate first attack
             experience: 0, // New players start with 0 experience
             level: 1,      // New players start at level 1
+            faction,       // Store the player's chosen faction
         };
 
         // Add the player to the game state

@@ -25,6 +25,7 @@ use crate::game_protocol::{
     ClientMessage, ClientMessageType, Direction, EmoteType, ProtocolVersion, ServerMessage,
     ServerMessageType,
 };
+use crate::world_lore::Faction;
 
 use crate::config::ClientConfig;
 
@@ -58,6 +59,7 @@ const MAX_BURST_SIZE: u32 = CLIENT_BURST_SIZE;
 pub enum OriginalMessage {
     Register {
         name: String,
+        faction: Faction,
         protocol_version: ProtocolVersion,
     },
     Move {
@@ -302,10 +304,12 @@ impl NetworkManager {
             let message_with_seq = match message {
                 ClientMessage::Register {
                     name,
+                    faction,
                     protocol_version,
                     ..
                 } => ClientMessage::Register {
                     name,
+                    faction, // Use original faction from registration
                     protocol_version,
                     seq_num,
                 },
@@ -345,10 +349,12 @@ impl NetworkManager {
             let original = match &message_with_seq {
                 ClientMessage::Register {
                     name,
+                    faction,
                     protocol_version,
                     ..
                 } => OriginalMessage::Register {
                     name: name.clone(),
+                    faction: faction.clone(),
                     protocol_version: protocol_version.clone(),
                 },
                 ClientMessage::Move { direction, .. } => OriginalMessage::Move {
@@ -533,11 +539,13 @@ impl NetworkManager {
                 match original {
                     OriginalMessage::Register {
                         name,
+                        faction,
                         protocol_version,
                     } => {
                         debug!("Resending Register with original name: {}", name);
                         ClientMessage::Register {
                             name: name.clone(),
+                            faction: faction.clone(),
                             protocol_version: protocol_version.clone(),
                             seq_num,
                         }
@@ -599,6 +607,7 @@ impl NetworkManager {
                 match msg_type {
                     ClientMessageType::Register => ClientMessage::Register {
                         name: format!("Resend_{}", seq_num),
+                        faction: Faction::Independent, // Default to Independent for fallback
                         protocol_version: ProtocolVersion::default(),
                         seq_num,
                     },

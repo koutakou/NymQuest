@@ -1,6 +1,6 @@
-# NymQuest: Privacy-Focused Multiplayer Game
+# NymQuest: Privacy-Focused Multiplayer Game in a Cypherpunk World
 
-NymQuest is a privacy-preserving multiplayer game that leverages the Nym mixnet to ensure secure, anonymous communications between players. This innovative game demonstrates the practical application of privacy-enhancing technologies in interactive entertainment.
+NymQuest is a privacy-preserving multiplayer game set in a rich cypherpunk world that leverages the Nym mixnet to ensure secure, anonymous communications between players. This innovative game demonstrates the practical application of privacy-enhancing technologies in interactive entertainment while immersing players in a dystopian future where privacy is both scarce and valuable.
 
 ## Quick Start
 
@@ -46,11 +46,14 @@ For detailed build instructions including cross-platform compilation, see [BUILD
 
 ## Key Features
 
+- **Cypherpunk World**: Rich dystopian setting with factions, regions, and thematic elements
 - **Private Communications**: All game data transmitted through the Nym mixnet
 - **Real-Time Multiplayer**: Move around a 2D world, chat, use emotes, and engage in combat
 - **Enhanced Terminal Interface**: Intuitive UI with health bars and visual indicators
 - **Status Monitoring**: Real-time connection health and privacy protection level indicators
 - **Message Pacing**: Configurable delays to prevent timing correlation attacks
+- **Regional Security Levels**: Different areas of the game world feature varying levels of surveillance and security
+- **Cryptographic Items**: Collect and use cypherpunk-themed items with gameplay effects
 
 ## Documentation
 
@@ -65,6 +68,7 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
   - **[Movement System](./docs/features/movement.md)**: How player movement works
   - **[Privacy Features](./docs/features/privacy.md)**: Privacy benefits and implementations
   - **[Communication System](./docs/features/communication.md)**: Chat and emote systems
+  - **[Worldbuilding](./docs/worldbuilding.md)**: Cypherpunk theme, factions, regions, and lore
 - **Technical Documentation**:
   - **[Architecture](./docs/technical/architecture.md)**: System architecture and components
   - **[Protocol](./docs/technical/protocol.md)**: Communication protocol and versioning
@@ -73,6 +77,8 @@ Comprehensive documentation is available in the [`docs/`](./docs/) directory:
   - **[Message Pacing](./docs/technical/message_pacing.md)**: Timing correlation attack prevention
   - **[Connection Management](./docs/technical/connection_management.md)**: Heartbeat system and connection handling
   - **[State Persistence](./docs/technical/state_persistence.md)**: Game state saving and recovery
+  - **[Mixnet Health Monitoring](./docs/technical/mixnet_health_monitoring.md)**: Mixnet connection health monitoring
+  - **[Mixnet-Cypherpunk Integration](./docs/technical/mixnet_cypherpunk_integration.md)**: Integration of mixnet with cypherpunk worldbuilding
 
 ## Technology Stack
 

@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::config::GameConfig;
 use crate::game_protocol::{Player, Position};
+use crate::world_lore::Faction;
 
 /// Persistable game state structure that excludes sensitive runtime data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +37,8 @@ pub struct PersistedPlayer {
     pub experience: u32,
     /// Player level based on experience
     pub level: u8,
+    /// The faction the player belongs to
+    pub faction: Faction,
     /// Timestamp when player was last active (for cleanup purposes)
     pub last_active: u64,
 }
@@ -148,7 +151,8 @@ impl GameStatePersistence {
                     last_attack_time: player.last_attack_time,
                     experience: player.experience,
                     level: player.level,
-                    last_active: now, // Mark as active during save
+                    faction: player.faction.clone(), // Store player's faction
+                    last_active: now,                // Mark as active during save
                 };
                 (id.clone(), persisted)
             })
@@ -436,6 +440,7 @@ mod tests {
                 last_attack_time: 0,
                 experience: 25,
                 level: 1,
+                faction: Faction::Nyms, // Adding default test faction
                 last_active: now,
             },
         );
@@ -452,7 +457,8 @@ mod tests {
                 last_attack_time: 0,
                 experience: 75,
                 level: 2,
-                last_active: now - 3600, // 1 hour ago
+                faction: Faction::CorporateHegemony, // Adding test faction
+                last_active: now - 3600,             // 1 hour ago
             },
         );
 
