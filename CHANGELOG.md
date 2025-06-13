@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.2.0] - 2025-06-13
+
+### Added
+- Integrated Cypherpunk Worldbuilding with Mixnet Communication
+- Implemented comprehensive mixnet health monitoring system
+
+### Enhanced Privacy
+- Enhanced message padding with thread-safe implementation
+- Added dynamic message size padding for improved traffic analysis resistance
+- Implemented message size normalization to prevent correlation attacks
+
+### Fixed
+- Fixed unnecessary type cast in mixnet_health module
+
 ## [0.1.4] - 2025-05-27
 
 ### Added

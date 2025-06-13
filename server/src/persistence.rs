@@ -377,6 +377,7 @@ mod tests {
             last_attack_time: 1234567890,
             experience: 50,
             level: 1,
+            faction: Faction::Independent,
         };
         players.insert("player1".to_string(), player);
 
