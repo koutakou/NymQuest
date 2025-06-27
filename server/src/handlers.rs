@@ -557,7 +557,7 @@ async fn send_ack(
     let message_ttl = 30; // 30 seconds
     let authenticated_ack = AuthenticatedMessage::new_with_expiration(ack, auth_key, message_ttl)?;
 
-    let ack_json = serde_json::to_string(&authenticated_ack)?;
+    let ack_json = String::from_utf8(serde_json::to_vec(&authenticated_ack)?)?;
 
     // Serialize and send the authenticated acknowledgment
     client.send_reply(sender_tag.clone(), ack_json).await?;
@@ -590,7 +590,7 @@ pub async fn broadcast_shutdown_notification(
         shutdown_in_seconds,
     };
 
-    let message_json = serde_json::to_string(&shutdown_msg)?;
+    let message_json = String::from_utf8(serde_json::to_vec(&shutdown_msg)?)?;
 
     // Broadcast to all players
     for tag in player_tags {
@@ -630,7 +630,7 @@ pub async fn broadcast_game_state(
     let padded_message = pad_message(authenticated_message)?;
     debug!("Applied message padding to game state broadcast for enhanced privacy");
 
-    let serialized = serde_json::to_string(&padded_message)?;
+    let serialized = String::from_utf8(serde_json::to_vec(&padded_message)?)?;
 
     // Get a copy of all active connections
     let connections = game_state.get_connections();
@@ -727,7 +727,7 @@ pub async fn handle_client_message(
             seq_num: next_seq_num(),
         };
         let authenticated_response = AuthenticatedMessage::new(error_msg, auth_key)?;
-        let response_str = serde_json::to_string(&authenticated_response)?;
+        let response_str = String::from_utf8(serde_json::to_vec(&authenticated_response)?)?;
 
         // Send reply to the rate-limited client
         let _ = client.send_reply(sender_tag.clone(), response_str).await;
@@ -823,7 +823,7 @@ pub async fn handle_client_message(
                     let authenticated_error = AuthenticatedMessage::new(error_msg, auth_key)?;
                     // Apply message padding for privacy protection
                     let padded_error = pad_message(authenticated_error)?;
-                    let error_json = serde_json::to_string(&padded_error)?;
+                    let error_json = String::from_utf8(serde_json::to_vec(&padded_error)?)?;
                     client.send_reply(sender_tag.clone(), error_json).await?;
 
                     return Ok(());
@@ -1524,7 +1524,7 @@ async fn handle_chat(
 
             // Create confirmation message for the sender
             let confirm_msg = ServerMessage::Event {
-                message: format!("Your message has been sent: {}", message),
+                message: format!("Your message has been sent: {message}"),
                 seq_num: next_seq_num(),
             };
 

@@ -248,7 +248,7 @@ pub fn format_chat_message(msg: &ChatMessage, timestamp_format: bool) -> String 
         String::new()
     };
 
-    let sender_formatted = if msg.sender == "System" || msg.sender == "Server" {
+    let sender_formatted = if msg.sender.as_str() == "System" || msg.sender.as_str() == "Server" {
         format!("{}: ", msg.sender.bright_magenta().bold())
     } else {
         format!("{}: ", msg.sender.bright_cyan().bold())

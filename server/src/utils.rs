@@ -16,12 +16,12 @@ pub fn save_server_address(address: &str, auth_key: &AuthKey) -> Result<()> {
     // Ensure parent directory exists
     if let Some(parent) = file_path.parent() {
         std::fs::create_dir_all(parent)
-            .with_context(|| format!("Failed to create parent directory: {:?}", parent))?;
+            .with_context(|| format!("Failed to create parent directory: {parent:?}"))?;
     }
 
     // Create and write to the file atomically
     let mut file = File::create(&file_path)
-        .with_context(|| format!("Failed to create server address file at {:?}", file_path))?;
+        .with_context(|| format!("Failed to create server address file at {file_path:?}"))?;
 
     // Write server address and authentication key in the standard format
     writeln!(file, "{};{}", address, auth_key.to_base64())

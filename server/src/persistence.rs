@@ -339,7 +339,7 @@ impl GameStatePersistence {
             .unwrap_or_default()
             .as_secs();
         self.persist_dir
-            .join(format!("game_state_backup_{}.json", timestamp))
+            .join(format!("game_state_backup_{timestamp}.json"))
     }
 }
 

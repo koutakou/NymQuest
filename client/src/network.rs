@@ -393,7 +393,7 @@ impl NetworkManager {
 
             // Apply message padding for privacy protection against size correlation attacks
             let padded_msg = pad_message(authenticated_msg)?;
-            let message_str = serde_json::to_string(&padded_msg)?;
+            let message_str = String::from_utf8(serde_json::to_vec(&padded_msg)?)?;
 
             debug!("Applied message padding for enhanced privacy against size correlation attacks");
 
@@ -654,7 +654,7 @@ impl NetworkManager {
             if let Some(client) = &mut self.client {
                 // Create an authenticated message with HMAC tag
                 let authenticated_msg = AuthenticatedMessage::new(message, &self.auth_key)?;
-                let message_str = serde_json::to_string(&authenticated_msg)?;
+                let message_str = String::from_utf8(serde_json::to_vec(&authenticated_msg)?)?;
 
                 // Create recipient from server address
                 let recipient = Recipient::from_str(&self.server_address)

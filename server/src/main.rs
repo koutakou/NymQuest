@@ -73,7 +73,7 @@ fn init_logging() -> Result<()> {
 async fn main() -> Result<()> {
     // Initialize logging first
     if let Err(e) = init_logging() {
-        eprintln!("Failed to initialize logging: {}", e);
+        eprintln!("Failed to initialize logging: {e}");
         return Err(e);
     }
 

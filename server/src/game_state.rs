@@ -31,9 +31,9 @@ impl GameState {
     pub fn new() -> Self {
         let config = GameConfig::default();
         GameState {
-            players: RwLock::new(HashMap::new()),
-            connections: Mutex::new(Vec::new()),
-            last_heartbeat: Mutex::new(HashMap::new()),
+            players: RwLock::new(HashMap::with_capacity(100)),
+            connections: Mutex::new(Vec::with_capacity(100)),
+            last_heartbeat: Mutex::new(HashMap::with_capacity(100)),
             config,
         }
     }
@@ -41,9 +41,9 @@ impl GameState {
     /// Create a new GameState with specific configuration
     pub fn new_with_config(config: GameConfig) -> Self {
         GameState {
-            players: RwLock::new(HashMap::new()),
-            connections: Mutex::new(Vec::new()),
-            last_heartbeat: Mutex::new(HashMap::new()),
+            players: RwLock::new(HashMap::with_capacity(100)),
+            connections: Mutex::new(Vec::with_capacity(100)),
+            last_heartbeat: Mutex::new(HashMap::with_capacity(100)),
             config,
         }
     }
@@ -265,23 +265,26 @@ impl GameState {
 
     /// Get a player ID from a sender tag
     pub fn get_player_id(&self, tag: &AnonymousSenderTag) -> Option<String> {
-        match self.connections.lock() {
-            Ok(connections) => {
-                for (id, conn_tag) in connections.iter() {
-                    if conn_tag.to_string() == tag.to_string() {
-                        return Some(id.clone());
-                    }
-                }
-                None
-            }
+        // Clone connections to reduce lock scope
+        let connections_clone = match self.connections.lock() {
+            Ok(connections) => connections.clone(),
             Err(e) => {
                 warn!(
                     "Failed to access connections for player ID retrieval: {}",
                     e
                 );
-                None
+                return None;
+            }
+        };
+
+        // Search through connections without holding the lock
+        let tag_string = tag.to_string();
+        for (id, conn_tag) in connections_clone.iter() {
+            if conn_tag.to_string() == tag_string {
+                return Some(id.clone());
             }
         }
+        None
     }
 
     /// Get a clone of all players

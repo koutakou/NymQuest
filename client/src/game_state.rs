@@ -7,8 +7,9 @@ use crate::status_monitor::StatusMonitor;
 use crate::world_lore::Faction;
 
 /// Represents a chat message with sender, content, timestamp, and message type
+/// Uses Arc<String> for efficient sharing of strings
 pub struct ChatMessage {
-    pub sender: String,
+    pub sender: Arc<String>,
     pub content: String,
     pub timestamp: u64,
     pub message_type: MessageType,
@@ -39,7 +40,7 @@ pub struct GameState {
     pub world_boundaries: Option<WorldBoundaries>,
     pub status_monitor: Arc<Mutex<StatusMonitor>>,
     /// Last whisper sender name - for reply functionality
-    pub last_whisper_sender: Option<String>,
+    pub last_whisper_sender: Option<Arc<String>>,
 }
 
 impl GameState {
@@ -47,7 +48,7 @@ impl GameState {
     pub fn new() -> Self {
         Self {
             player_id: None,
-            players: HashMap::new(),
+            players: HashMap::with_capacity(100),
             is_typing: false,
             last_update: Instant::now(),
             chat_history: VecDeque::with_capacity(50),
@@ -115,7 +116,7 @@ impl GameState {
 
         // Create a new chat message
         let message = ChatMessage {
-            sender,
+            sender: Arc::new(sender),
             content,
             timestamp,
             message_type: MessageType::Chat,
@@ -140,7 +141,7 @@ impl GameState {
 
         // Create a new system message
         let message = ChatMessage {
-            sender,
+            sender: Arc::new(sender),
             content,
             timestamp,
             message_type: MessageType::System,
@@ -163,9 +164,12 @@ impl GameState {
             .unwrap_or_default()
             .as_millis() as u64;
 
+        // Create shared sender reference
+        let sender_arc = Arc::new(sender.clone());
+
         // Create a new whisper message
         let message = ChatMessage {
-            sender: sender.clone(),
+            sender: sender_arc.clone(),
             content,
             timestamp,
             message_type: MessageType::Whisper,
@@ -175,7 +179,7 @@ impl GameState {
         self.chat_history.push_back(message);
 
         // Update the last whisper sender for reply functionality
-        self.last_whisper_sender = Some(sender);
+        self.last_whisper_sender = Some(sender_arc);
 
         // Ensure we don't exceed the maximum history size
         while self.chat_history.len() > self.max_chat_history {
@@ -184,7 +188,7 @@ impl GameState {
     }
 
     /// Get the last whisper sender if any
-    pub fn get_last_whisper_sender(&self) -> Option<&String> {
+    pub fn get_last_whisper_sender(&self) -> Option<&Arc<String>> {
         self.last_whisper_sender.as_ref()
     }
 

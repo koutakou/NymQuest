@@ -198,7 +198,7 @@ pub fn render_chat_history(state: &GameState, max_messages: usize) {
             match msg.message_type {
                 MessageType::Whisper => {
                     // Private whisper messages
-                    if Some(&msg.sender) == state.player_id.as_ref() {
+                    if state.player_id.as_deref() == Some(msg.sender.as_str()) {
                         // Whisper sent by current player
                         println!(
                             "{} {} {}",

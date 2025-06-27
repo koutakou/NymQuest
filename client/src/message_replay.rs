@@ -112,19 +112,27 @@ pub fn is_message_replay(server_address: &str, seq_num: u64) -> bool {
 
     match REPLAY_PROTECTION.lock() {
         Ok(mut protection) => {
+            // Check if window exists first
+            let needs_creation = !protection.contains_key(server_address);
+
             // Get or create the replay protection window for this server
             let window = protection
                 .entry(server_address.to_string())
-                .or_insert_with(|| {
-                    debug!(
-                        "Creating replay protection window with size: {}",
-                        window_size
-                    );
-                    ReplayProtectionWindow::new(window_size)
-                });
+                .or_insert_with(|| ReplayProtectionWindow::new(window_size));
 
             // Check and update the window
-            window.process(seq_num)
+            let result = window.process(seq_num);
+
+            // Log after releasing the lock if this was a new window
+            if needs_creation {
+                drop(protection); // Explicitly release the lock
+                debug!(
+                    "Created replay protection window with size: {}",
+                    window_size
+                );
+            }
+
+            result
         }
         Err(e) => {
             tracing::error!("Warning: Failed to access replay protection data: {}", e);
