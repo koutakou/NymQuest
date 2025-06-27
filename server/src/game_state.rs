@@ -21,6 +21,8 @@ pub struct GameState {
     connections: Mutex<Vec<PlayerTag>>,
     /// Map of player IDs to their last heartbeat timestamp
     last_heartbeat: Mutex<HashMap<String, u64>>,
+    /// Reverse lookup: display_id (lowercase) -> player_id for O(1) lookups
+    display_id_to_player_id: RwLock<HashMap<String, String>>,
     /// Game configuration
     config: GameConfig,
 }
@@ -34,6 +36,7 @@ impl GameState {
             players: RwLock::new(HashMap::with_capacity(256)), // Increased capacity
             connections: Mutex::new(Vec::with_capacity(256)),
             last_heartbeat: Mutex::new(HashMap::with_capacity(256)),
+            display_id_to_player_id: RwLock::new(HashMap::with_capacity(256)),
             config,
         }
     }
@@ -44,6 +47,7 @@ impl GameState {
             players: RwLock::new(HashMap::with_capacity(256)), // Increased capacity
             connections: Mutex::new(Vec::with_capacity(256)),
             last_heartbeat: Mutex::new(HashMap::with_capacity(256)),
+            display_id_to_player_id: RwLock::new(HashMap::with_capacity(256)),
             config,
         }
     }
@@ -167,6 +171,7 @@ impl GameState {
         };
 
         // Add the player to the game state
+        let display_id_for_lookup = player.display_id.to_lowercase();
         match self.players.write() {
             Ok(mut players) => {
                 players.insert(player_id.clone(), player);
@@ -174,6 +179,16 @@ impl GameState {
             Err(e) => {
                 error!("Failed to add player to game state: {}", e);
                 return player_id; // Return the ID even if we couldn't add the player
+            }
+        }
+
+        // Add reverse lookup mapping for O(1) display_id -> player_id lookups
+        match self.display_id_to_player_id.write() {
+            Ok(mut reverse_lookup) => {
+                reverse_lookup.insert(display_id_for_lookup, player_id.clone());
+            }
+            Err(e) => {
+                error!("Failed to add reverse lookup mapping: {}", e);
             }
         }
 
@@ -235,14 +250,38 @@ impl GameState {
                 }
             }
 
-            // Remove from game state
-            if let Some(id) = &player_id_to_remove {
+            // Remove from game state and get display_id for reverse lookup cleanup
+            let display_id_for_cleanup = if let Some(id) = &player_id_to_remove {
+                let display_id = match self.players.read() {
+                    Ok(players) => players.get(id).map(|p| p.display_id.to_lowercase()),
+                    Err(e) => {
+                        error!("Failed to read player for display_id cleanup: {}", e);
+                        None
+                    }
+                };
+
                 match self.players.write() {
                     Ok(mut players) => {
                         players.remove(id);
                     }
                     Err(e) => {
                         error!("Failed to remove player from game state: {}", e);
+                    }
+                }
+
+                display_id
+            } else {
+                None
+            };
+
+            // Remove from reverse lookup HashMap
+            if let Some(display_id) = display_id_for_cleanup {
+                match self.display_id_to_player_id.write() {
+                    Ok(mut reverse_lookup) => {
+                        reverse_lookup.remove(&display_id);
+                    }
+                    Err(e) => {
+                        error!("Failed to remove from reverse lookup: {}", e);
                     }
                 }
             }
@@ -327,21 +366,25 @@ impl GameState {
 
     /// Find a player's internal ID from their display ID
     /// This lookup is case-insensitive to improve user experience
+    /// Optimized O(1) lookup for player ID by display ID (case insensitive)
     pub fn get_player_id_by_display_id(&self, display_id: &str) -> Option<String> {
         let lowercase_target = display_id.to_lowercase();
-        match self.players.read() {
-            Ok(players) => {
-                for (id, player) in players.iter() {
-                    // Case insensitive comparison
-                    if player.display_id.to_lowercase() == lowercase_target {
-                        return Some(id.clone());
-                    }
-                }
-                None
-            }
+        match self.display_id_to_player_id.read() {
+            Ok(reverse_lookup) => reverse_lookup.get(&lowercase_target).cloned(),
             Err(e) => {
-                warn!("Failed to access players for display ID lookup: {}", e);
-                None
+                warn!("Failed to access reverse lookup for display ID: {}", e);
+                // Fallback to linear search if reverse lookup is poisoned
+                match self.players.read() {
+                    Ok(players) => {
+                        for (id, player) in players.iter() {
+                            if player.display_id.to_lowercase() == lowercase_target {
+                                return Some(id.clone());
+                            }
+                        }
+                        None
+                    }
+                    Err(_) => None,
+                }
             }
         }
     }

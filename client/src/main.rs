@@ -13,6 +13,12 @@ mod status_monitor;
 mod ui_components;
 mod world_lore;
 
+// Application constants
+const USER_INPUT_CHANNEL_BUFFER: usize = 256;
+const TYPING_STATE_CHANNEL_BUFFER: usize = 32;
+const HEARTBEAT_CHECK_INTERVAL_MS: u64 = 1000;
+const DEFAULT_PACING_INTERVAL_MS: u64 = 100;
+
 use crate::world_lore::Faction;
 
 use colored::*;
@@ -94,10 +100,10 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Create a channel for user input commands (increased buffer for better performance)
-    let (tx, mut rx) = mpsc::channel::<String>(256);
+    let (tx, mut rx) = mpsc::channel::<String>(USER_INPUT_CHANNEL_BUFFER);
 
     // Create a dedicated channel for controlling typing state (increased buffer)
-    let (typing_tx, mut typing_rx) = mpsc::channel::<bool>(32);
+    let (typing_tx, mut typing_rx) = mpsc::channel::<bool>(TYPING_STATE_CHANNEL_BUFFER);
     let typing_tx_clone = typing_tx.clone();
 
     // Initialize rustyline editor with history
@@ -231,6 +237,116 @@ async fn main() -> anyhow::Result<()> {
     }
 }
 
+/// Handle registration command processing
+async fn handle_register_command(
+    command_parts: &[&str],
+    network: &mut NetworkManager,
+    game_state: &Arc<Mutex<GameState>>,
+) -> anyhow::Result<()> {
+    // Check if the player is already registered
+    if let Ok(mut state) = game_state.lock() {
+        if state.is_registered() {
+            // Show in UI instead of just logging
+            state.add_system_message(
+                "System".to_string(),
+                "You are already registered. Please disconnect first before registering again."
+                    .to_string(),
+            );
+            render_game_state(&state);
+            return Ok(());
+        }
+
+        // Update status monitor with registration status
+        if let Ok(mut monitor) = state.status_monitor.lock() {
+            monitor.update_game_state_info("Registration in progress...".to_string());
+        }
+
+        // Show the status in the UI
+        render_game_state(&state);
+    } else {
+        // Direct console output for critical errors
+        println!(
+            "{}",
+            "Failed to access game state for registration check. Please restart the client.".red()
+        );
+        return Ok(());
+    }
+
+    // Parse command: /register <name> <faction>
+    if command_parts.len() < 3 {
+        if let Ok(mut state) = game_state.lock() {
+            state.add_system_message(
+                "System".to_string(),
+                "Usage: /register <name> <faction>\nAvailable factions:\n - nyms (The Nyms Coalition)\n - corporate/corp (Corporate Hegemony)\n - cipher/collective (Cipher Collective)\n - monks/algorithm (Algorithm Monks)\n - independent/indie (Independent Operators)".to_string(),
+            );
+
+            // Reset the registration status
+            if let Ok(mut monitor) = state.status_monitor.lock() {
+                monitor.update_game_state_info(
+                    "Registration failed - incomplete information".to_string(),
+                );
+            }
+
+            render_game_state(&state);
+        }
+        return Ok(());
+    }
+
+    let name = command_parts[1].trim().to_string();
+    let faction_input = command_parts[2].trim().to_lowercase();
+
+    // Parse faction selection
+    let faction = match faction_input.as_str() {
+        "nyms" => Faction::Nyms,
+        "corporate" | "corp" | "hegemony" => Faction::CorporateHegemony,
+        "cipher" | "collective" | "ciphercollective" => Faction::CipherCollective,
+        "monks" | "algorithm" | "algorithmmonks" => Faction::AlgorithmMonks,
+        "independent" | "indie" | "free" => Faction::Independent,
+        _ => {
+            if let Ok(mut state) = game_state.lock() {
+                state.add_system_message(
+                    "System".to_string(),
+                    "Invalid faction. Available options:\n - nyms (privacy advocates)\n - corporate/corp (corporate power)\n - cipher/collective (data liberation)\n - monks/algorithm (digital mystics)\n - independent/indie (free agents)".to_string(),
+                );
+
+                if let Ok(mut monitor) = state.status_monitor.lock() {
+                    monitor.update_game_state_info(
+                        "Registration failed - invalid faction".to_string(),
+                    );
+                }
+
+                render_game_state(&state);
+            }
+            return Ok(());
+        }
+    };
+
+    // Create register message (sequence number handled by NetworkManager)
+    let register_msg = ClientMessage::Register {
+        name: name.clone(),
+        faction: faction.clone(), // Add selected faction to registration message
+        protocol_version: ProtocolVersion::default(),
+        seq_num: 0, // Placeholder, will be replaced by NetworkManager
+    };
+
+    // Show registration attempt message in UI
+    if let Ok(mut state) = game_state.lock() {
+        state.add_system_message(
+            "System".to_string(),
+            format!("Attempting to register as '{}' of the {} faction. Please wait...\nEach faction has unique advantages in the cypherpunk world.",
+                name, format!("{:?}", faction).replace("CorporateHegemony", "Corporate Hegemony").replace("CipherCollective", "Cipher Collective").replace("AlgorithmMonks", "Algorithm Monks")),
+        );
+        render_game_state(&state);
+    }
+
+    // Send the message
+    network.send_message(register_msg).await?;
+
+    // Direct console output to show status
+    println!("{}", "Registration request sent...".cyan());
+    Ok(())
+}
+
 /// Process a command entered by the user
 async fn process_user_command(
     input: &str,
@@ -250,101 +366,7 @@ async fn process_user_command(
     match cmd {
         // Registration command
         "register" | "r" => {
-            // Check if the player is already registered
-            if let Ok(mut state) = game_state.lock() {
-                if state.is_registered() {
-                    // Show in UI instead of just logging
-                    state.add_system_message("System".to_string(), 
-                        "You are already registered. Please disconnect first before registering again.".to_string());
-                    render_game_state(&state);
-                    return Ok(());
-                }
-
-                // Update status monitor with registration status
-                if let Ok(mut monitor) = state.status_monitor.lock() {
-                    monitor.update_game_state_info("Registration in progress...".to_string());
-                }
-
-                // Show the status in the UI
-                render_game_state(&state);
-            } else {
-                // Direct console output for critical errors
-                println!("{}", "Failed to access game state for registration check. Please restart the client.".red());
-                return Ok(());
-            }
-
-            // Parse command: /register <name> <faction>
-            if command_parts.len() < 3 {
-                if let Ok(mut state) = game_state.lock() {
-                    state.add_system_message(
-                        "System".to_string(),
-                        "Usage: /register <name> <faction>\nAvailable factions:\n - nyms (The Nyms Coalition)\n - corporate/corp (Corporate Hegemony)\n - cipher/collective (Cipher Collective)\n - monks/algorithm (Algorithm Monks)\n - independent/indie (Independent Operators)".to_string(),
-                    );
-
-                    // Reset the registration status
-                    if let Ok(mut monitor) = state.status_monitor.lock() {
-                        monitor.update_game_state_info(
-                            "Registration failed - incomplete information".to_string(),
-                        );
-                    }
-
-                    render_game_state(&state);
-                }
-                return Ok(());
-            }
-
-            let name = command_parts[1].trim().to_string();
-            let faction_input = command_parts[2].trim().to_lowercase();
-
-            // Parse faction selection
-            let faction = match faction_input.as_str() {
-                "nyms" => Faction::Nyms,
-                "corporate" | "corp" | "hegemony" => Faction::CorporateHegemony,
-                "cipher" | "collective" | "ciphercollective" => Faction::CipherCollective,
-                "monks" | "algorithm" | "algorithmmonks" => Faction::AlgorithmMonks,
-                "independent" | "indie" | "free" => Faction::Independent,
-                _ => {
-                    if let Ok(mut state) = game_state.lock() {
-                        state.add_system_message(
-                            "System".to_string(),
-                            "Invalid faction. Available options:\n - nyms (privacy advocates)\n - corporate/corp (corporate power)\n - cipher/collective (data liberation)\n - monks/algorithm (digital mystics)\n - independent/indie (free agents)".to_string(),
-                        );
-
-                        if let Ok(mut monitor) = state.status_monitor.lock() {
-                            monitor.update_game_state_info(
-                                "Registration failed - invalid faction".to_string(),
-                            );
-                        }
-
-                        render_game_state(&state);
-                    }
-                    return Ok(());
-                }
-            };
-
-            // Create register message (sequence number handled by NetworkManager)
-            let register_msg = ClientMessage::Register {
-                name: name.clone(),
-                faction: faction.clone(), // Add selected faction to registration message
-                protocol_version: ProtocolVersion::default(),
-                seq_num: 0, // Placeholder, will be replaced by NetworkManager
-            };
-
-            // Show registration attempt message in UI
-            if let Ok(mut state) = game_state.lock() {
-                state.add_system_message(
-                    "System".to_string(),
-                    format!("Attempting to register as '{}' of the {} faction. Please wait...\nEach faction has unique advantages in the cypherpunk world.",
-                        name, format!("{:?}", faction).replace("CorporateHegemony", "Corporate Hegemony").replace("CipherCollective", "Cipher Collective").replace("AlgorithmMonks", "Algorithm Monks")),
-                );
-                render_game_state(&state);
-            }
-
-            // Send the message
-            network.send_message(register_msg).await?;
-
-            // Direct console output to show status
-            println!("{}", "Registration request sent...".cyan());
+            handle_register_command(&command_parts, network, game_state).await?;
         }
         // Movement commands
         "move" | "m" | "go" => {
@@ -717,12 +739,15 @@ async fn process_user_command(
                         match command_parts[2].parse::<u64>() {
                             Ok(val) => val,
                             Err(_) => {
-                                info!("Invalid interval value. Using default 100ms.");
-                                100
+                                info!(
+                                    "Invalid interval value. Using default {}ms.",
+                                    DEFAULT_PACING_INTERVAL_MS
+                                );
+                                DEFAULT_PACING_INTERVAL_MS
                             }
                         }
                     } else {
-                        100 // Default interval
+                        DEFAULT_PACING_INTERVAL_MS // Default interval
                     };
 
                     // Enable message pacing with specified interval
@@ -780,7 +805,8 @@ async fn run_event_loop(
     config: &ClientConfig,
 ) -> anyhow::Result<()> {
     // Create an interval for checking unacknowledged messages
-    let mut check_interval = time::interval(time::Duration::from_millis(1000));
+    let mut check_interval =
+        time::interval(time::Duration::from_millis(HEARTBEAT_CHECK_INTERVAL_MS));
 
     // This loop will run until the process exits
     loop {

@@ -30,6 +30,8 @@ pub enum MessageType {
 pub struct GameState {
     pub player_id: Option<String>,
     pub players: HashMap<String, Player>,
+    /// Reverse lookup: display_id (lowercase) -> player_id for O(1) lookups
+    pub display_id_to_player_id: HashMap<String, String>,
     pub is_typing: bool,
     pub last_update: Instant,
     /// Chat history with most recent messages at the end
@@ -49,6 +51,7 @@ impl GameState {
         Self {
             player_id: None,
             players: HashMap::with_capacity(200), // Increased capacity for better performance
+            display_id_to_player_id: HashMap::with_capacity(200), // Reverse lookup HashMap
             is_typing: false,
             last_update: Instant::now(),
             chat_history: VecDeque::with_capacity(100), // Increased capacity
@@ -93,6 +96,14 @@ impl GameState {
     /// Update the game state with new player data
     pub fn update_players(&mut self, players: HashMap<String, Player>) {
         self.players = players;
+
+        // Rebuild reverse lookup HashMap for O(1) display_id lookups
+        self.display_id_to_player_id.clear();
+        for (player_id, player) in &self.players {
+            self.display_id_to_player_id
+                .insert(player.display_id.to_lowercase(), player_id.clone());
+        }
+
         self.update_timestamp();
     }
 
@@ -210,18 +221,10 @@ impl GameState {
         self.world_boundaries.as_ref()
     }
 
-    /// Get player ID by display ID/name (case insensitive)
+    /// Optimized O(1) lookup for player ID by display ID (case insensitive)
     pub fn get_player_id_by_display_id(&self, display_id: &str) -> Option<String> {
-        // Case insensitive comparison
         let lowercase_target = display_id.to_lowercase();
-
-        // Find the player with the matching display_id and return their ID
-        for (id, player) in &self.players {
-            if player.display_id.to_lowercase() == lowercase_target {
-                return Some(id.clone());
-            }
-        }
-        None
+        self.display_id_to_player_id.get(&lowercase_target).cloned()
     }
 
     /// Get connection tag for a player by ID

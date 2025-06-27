@@ -10,6 +10,13 @@ mod persistence;
 mod utils;
 mod world_lore;
 
+// Server operation constants
+const STALE_PLAYER_CLEANUP_THRESHOLD_SECONDS: u64 = 300; // 5 minutes
+const PERSISTENCE_INTERVAL_SECONDS: u64 = 120; // 2 minutes
+const RATE_LIMITER_CLEANUP_INTERVAL_SECONDS: u64 = 300; // 5 minutes
+const MONITORING_STATS_INTERVAL_SECONDS: u64 = 60; // 1 minute
+const SHUTDOWN_NOTIFICATION_COUNTDOWN_SECONDS: u8 = 5;
+
 use config::GameConfig;
 use game_protocol::{ClientMessage, Player, Position};
 use game_state::GameState;
@@ -209,7 +216,7 @@ async fn main() -> Result<()> {
             info!("Attempting to recover previous game state");
 
             // Clean up stale players (offline for more than 5 minutes)
-            let cleanup_threshold = 300; // 5 minutes in seconds
+            let cleanup_threshold = STALE_PLAYER_CLEANUP_THRESHOLD_SECONDS;
             persistence.cleanup_stale_players(&mut persisted_state, cleanup_threshold);
 
             // Restore player data (excluding network connections)
@@ -288,16 +295,18 @@ async fn main() -> Result<()> {
     ));
 
     // Add persistence interval (save state every 2 minutes)
-    let mut persistence_interval = interval(Duration::from_secs(120));
+    let mut persistence_interval = interval(Duration::from_secs(PERSISTENCE_INTERVAL_SECONDS));
 
     // Add rate limiter cleanup interval (cleanup every 5 minutes)
-    let mut rate_limiter_cleanup_interval = interval(Duration::from_secs(300));
+    let mut rate_limiter_cleanup_interval =
+        interval(Duration::from_secs(RATE_LIMITER_CLEANUP_INTERVAL_SECONDS));
 
     // Message processing pacing for privacy protection
     let mut last_message_processed: Option<Instant> = None;
 
     // Add monitoring stats interval (log every 60 seconds)
-    let mut monitor_stats_interval = interval(Duration::from_secs(60));
+    let mut monitor_stats_interval =
+        interval(Duration::from_secs(MONITORING_STATS_INTERVAL_SECONDS));
 
     // Skip the first tick to avoid immediate execution
     heartbeat_interval.tick().await;
@@ -328,7 +337,7 @@ async fn main() -> Result<()> {
                     &client,
                     &game_state,
                     "Server is shutting down",
-                    5, // 5 second countdown before forced disconnect
+                    SHUTDOWN_NOTIFICATION_COUNTDOWN_SECONDS,
                     &auth_key
                 ).await {
                     error!("Failed to send shutdown notification: {}", e);
