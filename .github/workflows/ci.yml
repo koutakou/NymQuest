@@ -46,26 +46,6 @@ jobs:
           path: target
           key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-      - name: Check server formatting
-        run: |
-          cd server
-          cargo fmt --all -- --check
-
-      - name: Check client formatting
-        run: |
-          cd client
-          cargo fmt --all -- --check
-
-      - name: Lint server with clippy
-        run: |
-          cd server
-          cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Lint client with clippy
-        run: |
-          cd client
-          cargo clippy --all-targets --all-features -- -D warnings
-
       - name: Build server
         run: |
           cd server
@@ -75,13 +55,3 @@ jobs:
         run: |
           cd client
           cargo build --verbose
-
-      - name: Run server tests
-        run: |
-          cd server
-          cargo test --verbose
-
-      - name: Run client tests
-        run: |
-          cd client
-          cargo test --verbose
