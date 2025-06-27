@@ -60,20 +60,26 @@ pub fn get_message_priority(msg_type: &ClientMessageType) -> MessagePriority {
 
 /// Token bucket rate limiter for DoS protection
 /// Tracks rate limits per connection to prevent spam while preserving privacy
+/// Uses integer arithmetic for better performance
 #[derive(Debug, Clone)]
 struct TokenBucket {
-    tokens: f32,
-    max_tokens: u32,
-    refill_rate: f32, // tokens per second
+    /// Current tokens in millitokens (tokens * 1000) for integer arithmetic
+    tokens_millis: u32,
+    /// Maximum tokens in millitokens
+    max_tokens_millis: u32,
+    /// Refill rate in millitokens per second
+    refill_rate_millis: u32,
     last_refill: SystemTime,
 }
 
 impl TokenBucket {
     fn new(max_tokens: u32, refill_rate: f32) -> Self {
+        let max_tokens_millis = max_tokens * 1000;
+        let refill_rate_millis = (refill_rate * 1000.0) as u32;
         Self {
-            tokens: max_tokens as f32,
-            max_tokens,
-            refill_rate,
+            tokens_millis: max_tokens_millis,
+            max_tokens_millis,
+            refill_rate_millis,
             last_refill: SystemTime::now(),
         }
     }
@@ -82,21 +88,22 @@ impl TokenBucket {
     fn try_consume(&mut self) -> bool {
         self.refill_tokens();
 
-        if self.tokens >= 1.0 {
-            self.tokens -= 1.0;
+        if self.tokens_millis >= 1000 {
+            self.tokens_millis -= 1000;
             true
         } else {
             false
         }
     }
 
-    /// Refill tokens based on elapsed time
+    /// Refill tokens based on elapsed time using integer arithmetic
     fn refill_tokens(&mut self) {
         let now = SystemTime::now();
         if let Ok(elapsed) = now.duration_since(self.last_refill) {
-            let elapsed_secs = elapsed.as_secs_f32();
-            let new_tokens = elapsed_secs * self.refill_rate;
-            self.tokens = (self.tokens + new_tokens).min(self.max_tokens as f32);
+            let elapsed_millis = elapsed.as_millis() as u64;
+            let new_tokens_millis = (elapsed_millis * self.refill_rate_millis as u64) / 1000;
+            self.tokens_millis =
+                (self.tokens_millis + new_tokens_millis as u32).min(self.max_tokens_millis);
             self.last_refill = now;
         }
     }

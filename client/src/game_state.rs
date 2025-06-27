@@ -48,11 +48,11 @@ impl GameState {
     pub fn new() -> Self {
         Self {
             player_id: None,
-            players: HashMap::with_capacity(100),
+            players: HashMap::with_capacity(200), // Increased capacity for better performance
             is_typing: false,
             last_update: Instant::now(),
-            chat_history: VecDeque::with_capacity(50),
-            max_chat_history: 50,
+            chat_history: VecDeque::with_capacity(100), // Increased capacity
+            max_chat_history: 100,
             world_boundaries: None,
             status_monitor: Arc::new(Mutex::new(StatusMonitor::new())),
             last_whisper_sender: None,

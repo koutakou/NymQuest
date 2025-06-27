@@ -4,7 +4,7 @@ use nym_sdk::mixnet::{
     IncludedSurbs, MixnetClient, MixnetClientBuilder, MixnetMessageSender, Recipient, StoragePaths,
 };
 use rand::Rng;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -51,6 +51,12 @@ const CLIENT_BURST_SIZE: u32 = 15; // Slightly below server default of 20
 /// Maximum number of messages to send in a burst before enforcing rate limit
 const MAX_BURST_SIZE: u32 = CLIENT_BURST_SIZE;
 
+/// Maximum number of server message IDs to keep for replay protection
+const MAX_RECEIVED_MSG_HISTORY: usize = 1000;
+
+/// Maximum number of pending acknowledgments to track
+const MAX_PENDING_ACKS: usize = 100;
+
 // All default pacing values are now driven by the client configuration
 
 /// NetworkManager handles all interactions with the Nym mixnet
@@ -88,7 +94,8 @@ pub struct NetworkManager {
     auth_key: AuthKey,
     pending_acks: HashMap<u64, (Instant, ClientMessageType)>,
     retry_count: HashMap<u64, usize>,
-    received_server_msgs: HashSet<u64>,
+    /// Bounded queue for received server message IDs (replay protection)
+    received_server_msgs: VecDeque<u64>,
     seq_counter: u64,
     original_messages: HashMap<u64, OriginalMessage>,
     #[allow(dead_code)] // Part of complete network API for future use
@@ -218,9 +225,9 @@ impl NetworkManager {
             client: Some(client),
             server_address,
             auth_key,
-            pending_acks: HashMap::new(),
-            retry_count: HashMap::new(),
-            received_server_msgs: HashSet::new(),
+            pending_acks: HashMap::with_capacity(MAX_PENDING_ACKS),
+            retry_count: HashMap::with_capacity(MAX_PENDING_ACKS),
+            received_server_msgs: VecDeque::with_capacity(MAX_RECEIVED_MSG_HISTORY),
             seq_counter: 1,
             original_messages: HashMap::new(),
             config: config.clone(),
@@ -894,14 +901,11 @@ impl NetworkManager {
         }
 
         // Record that we've received this message
-        self.received_server_msgs.insert(seq_num);
+        self.received_server_msgs.push_back(seq_num);
 
-        // Keep the set size manageable
-        if self.received_server_msgs.len() > 1000 {
-            // Remove old sequence numbers (simpler than a proper order-preserving queue)
-            // In a production system, you'd use a more sophisticated approach
-            let threshold = seq_num.saturating_sub(500);
-            self.received_server_msgs.retain(|&num| num >= threshold);
+        // Keep the queue size manageable - remove oldest entries
+        while self.received_server_msgs.len() > MAX_RECEIVED_MSG_HISTORY {
+            self.received_server_msgs.pop_front();
         }
 
         match server_message {

@@ -1,9 +1,40 @@
 use chrono::{TimeZone, Timelike, Utc};
 use colored::*;
 use std::io::{self, Write};
+use std::sync::{Arc, Mutex};
 
 use crate::game_protocol::Position;
 use crate::game_state::{GameState, MessageType};
+
+/// Cached mini-map grid to avoid repeated allocations
+static MINI_MAP_CACHE: std::sync::LazyLock<Arc<Mutex<Vec<Vec<char>>>>> =
+    std::sync::LazyLock::new(|| {
+        const MAP_SIZE: usize = 15;
+        let mut map = vec![vec![' '; MAP_SIZE]; MAP_SIZE];
+
+        // Pre-populate with grid and borders
+        for y in 1..MAP_SIZE - 1 {
+            for x in 1..MAP_SIZE - 1 {
+                map[y][x] = '·';
+            }
+        }
+
+        // Draw border
+        for i in 0..MAP_SIZE {
+            map[0][i] = '-';
+            map[MAP_SIZE - 1][i] = '-';
+            map[i][0] = '|';
+            map[i][MAP_SIZE - 1] = '|';
+        }
+
+        // Map corners
+        map[0][0] = '+';
+        map[0][MAP_SIZE - 1] = '+';
+        map[MAP_SIZE - 1][0] = '+';
+        map[MAP_SIZE - 1][MAP_SIZE - 1] = '+';
+
+        Arc::new(Mutex::new(map))
+    });
 
 /// Constants for critical hit detection in messages
 const CRITICAL_HIT_MARKER: &str = "CRITICAL HIT";
@@ -41,30 +72,36 @@ pub fn render_mini_map(state: &GameState, _player_pos: &Position) {
         WORLD_MIN_X, WORLD_MAX_X, WORLD_MIN_Y, WORLD_MAX_Y
     );
 
-    // Create an empty map grid with borders and light grid
-    let mut map = vec![vec![' '; MAP_SIZE]; MAP_SIZE];
+    // Use cached map grid to avoid repeated allocations
+    let mut map = if let Ok(cached_map) = MINI_MAP_CACHE.lock() {
+        cached_map.clone()
+    } else {
+        // Fallback to creating new map if cache is locked
+        let mut fallback_map = vec![vec![' '; MAP_SIZE]; MAP_SIZE];
 
-    // Draw light grid for better cell visualization
-    #[allow(clippy::needless_range_loop)]
-    for y in 1..MAP_SIZE - 1 {
-        for x in 1..MAP_SIZE - 1 {
-            map[y][x] = '·'; // Light dot for grid points
+        // Draw light grid for better cell visualization
+        for y in 1..MAP_SIZE - 1 {
+            for x in 1..MAP_SIZE - 1 {
+                fallback_map[y][x] = '·';
+            }
         }
-    }
 
-    // Draw border
-    for i in 0..MAP_SIZE {
-        map[0][i] = '-';
-        map[MAP_SIZE - 1][i] = '-';
-        map[i][0] = '|';
-        map[i][MAP_SIZE - 1] = '|';
-    }
+        // Draw border
+        for i in 0..MAP_SIZE {
+            fallback_map[0][i] = '-';
+            fallback_map[MAP_SIZE - 1][i] = '-';
+            fallback_map[i][0] = '|';
+            fallback_map[i][MAP_SIZE - 1] = '|';
+        }
 
-    // Map corners
-    map[0][0] = '+';
-    map[0][MAP_SIZE - 1] = '+';
-    map[MAP_SIZE - 1][0] = '+';
-    map[MAP_SIZE - 1][MAP_SIZE - 1] = '+';
+        // Map corners
+        fallback_map[0][0] = '+';
+        fallback_map[0][MAP_SIZE - 1] = '+';
+        fallback_map[MAP_SIZE - 1][0] = '+';
+        fallback_map[MAP_SIZE - 1][MAP_SIZE - 1] = '+';
+
+        fallback_map
+    };
 
     // Calculate scale factors to map world coordinates to minimap coordinates
     let _scale_x = (MAP_SIZE - 2) as f32 / (WORLD_MAX_X - WORLD_MIN_X);

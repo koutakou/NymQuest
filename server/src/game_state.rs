@@ -31,9 +31,9 @@ impl GameState {
     pub fn new() -> Self {
         let config = GameConfig::default();
         GameState {
-            players: RwLock::new(HashMap::with_capacity(100)),
-            connections: Mutex::new(Vec::with_capacity(100)),
-            last_heartbeat: Mutex::new(HashMap::with_capacity(100)),
+            players: RwLock::new(HashMap::with_capacity(256)), // Increased capacity
+            connections: Mutex::new(Vec::with_capacity(256)),
+            last_heartbeat: Mutex::new(HashMap::with_capacity(256)),
             config,
         }
     }
@@ -41,9 +41,9 @@ impl GameState {
     /// Create a new GameState with specific configuration
     pub fn new_with_config(config: GameConfig) -> Self {
         GameState {
-            players: RwLock::new(HashMap::with_capacity(100)),
-            connections: Mutex::new(Vec::with_capacity(100)),
-            last_heartbeat: Mutex::new(HashMap::with_capacity(100)),
+            players: RwLock::new(HashMap::with_capacity(256)), // Increased capacity
+            connections: Mutex::new(Vec::with_capacity(256)),
+            last_heartbeat: Mutex::new(HashMap::with_capacity(256)),
             config,
         }
     }

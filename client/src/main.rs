@@ -93,11 +93,11 @@ async fn main() -> anyhow::Result<()> {
         }
     };
 
-    // Create a channel for user input commands
-    let (tx, mut rx) = mpsc::channel::<String>(100);
+    // Create a channel for user input commands (increased buffer for better performance)
+    let (tx, mut rx) = mpsc::channel::<String>(256);
 
-    // Create a dedicated channel for controlling typing state
-    let (typing_tx, mut typing_rx) = mpsc::channel::<bool>(10);
+    // Create a dedicated channel for controlling typing state (increased buffer)
+    let (typing_tx, mut typing_rx) = mpsc::channel::<bool>(32);
     let typing_tx_clone = typing_tx.clone();
 
     // Initialize rustyline editor with history
