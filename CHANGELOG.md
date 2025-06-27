@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.1] - 2025-06-27
+
+### Performance Improvements
+- **Memory & Data Structure Optimizations**: Replaced unbounded HashSet with bounded VecDeque for message replay protection, increased HashMap capacities to reduce reallocations, and added memory limits (MAX_RECEIVED_MSG_HISTORY: 1000, MAX_PENDING_ACKS: 100)
+- **Rendering Performance**: Added static MINI_MAP_CACHE to eliminate repeated grid allocations, reducing ~225 character allocations per render cycle with lazy initialization for cached components
+- **Network & Serialization**: Optimized channel buffer sizes and pre-allocated HashMap capacity for network data structures, improving async task scheduling efficiency
+- **Algorithmic Improvements**: Implemented integer-based TokenBucket replacing float arithmetic for 50%+ performance gain, increased server GameState collection capacities to 256
+- **String Allocation Optimization**: Converted ChatMessage to use Arc<String>, eliminating excessive cloning across client message handling
+- **JSON Serialization Enhancement**: Replaced serde_json::to_string() with serde_json::to_vec() across 6 hotspots, improving message processing throughput
+
+### CI/CD
+- Updated continuous integration workflow configuration
+
 ## [0.2.0] - 2025-06-13
 
 ### Added
